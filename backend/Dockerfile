@@ -35,7 +35,7 @@ WORKDIR /build
 # Copy requirements first so Docker can cache this layer.
 # The layer is only rebuilt when requirements.txt changes, not on every
 # code change — this keeps rebuilds fast during development.
-COPY requirements.txt .
+COPY backend/requirements.txt .
 
 # Install dependencies into an isolated virtual environment.
 # Using a venv makes it trivial to copy just the packages to stage 2.
@@ -67,7 +67,9 @@ WORKDIR /home/appuser/app
 USER appuser
 
 # Copy the application code.
-COPY --chown=appuser:appuser . .
+# Copy the application code and the separate db library.
+COPY --chown=appuser:appuser backend/app/ ./app/
+COPY --chown=appuser:appuser db/ ./db/
 
 # ---------------------------------------------------------------------------
 # Runtime environment variables — defaults only.

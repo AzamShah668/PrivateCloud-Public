@@ -1,0 +1,26 @@
+# =============================================================================
+# .dockerignore (Root)
+# =============================================================================
+# Exclude files when building the backend from the project root.
+# =============================================================================
+
+# Local virtual environment
+**/venv/
+**/__pycache__/
+
+# Environment / secrets
+.env
+*.env
+
+# IDE and OS clutter
+.idea/
+.vscode/
+
+# Git history
+.git/
+.gitignore
+
+# Docker files (not needed inside the image)
+docker-compose.yml
+backend/Dockerfile
+db/Dockerfile

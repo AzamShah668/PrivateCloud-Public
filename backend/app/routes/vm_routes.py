@@ -151,15 +151,17 @@ def create_vm(
     )
 
     # ── Step 5: call Proxmox to actually create the VM ────────────────────
+    os_val = vm_request.os_choice.value
     proxmox_config = {
         "node":      vm_request.node,
         "vmid":      vmid,
         "name":      vm_request.vm_name,
-        "ostype":    _map_os_to_proxmox_type(vm_request.os_choice.value),
+        "ostype":    _map_os_to_proxmox_type(os_val),
         "cores":     vm_request.cpu_cores,
         "memory":    vm_request.ram_mb,
-        "storage":   "local-lvm",          # your Proxmox storage pool name
+        "storage":   "local-lvm",
         "disk_size": str(vm_request.storage_gb),
+        "iso":       _map_os_to_iso(os_val),
     }
 
     try:
@@ -303,18 +305,18 @@ def get_vm(
 # Utility: map OS choice string to Proxmox ostype parameter
 # =============================================================================
 
+_OS_MAP = {
+    "ubuntu-22.04": {"ostype": "l26",   "iso": "local:iso/ubuntu-22.04-live-server-amd64.iso"},
+    "ubuntu-24.04": {"ostype": "l26",   "iso": "local:iso/ubuntu-24.04-live-server-amd64.iso"},
+    "debian-12":    {"ostype": "l26",   "iso": "local:iso/debian-12-netinst-amd64.iso"},
+    "centos-9":     {"ostype": "l26",   "iso": "local:iso/CentOS-Stream-9-latest-x86_64-dvd1.iso"},
+    "windows-11":   {"ostype": "win11", "iso": "local:iso/Win11_23H2_English_x64.iso"},
+}
+
+
 def _map_os_to_proxmox_type(os_choice: str) -> str:
-    """
-    Proxmox uses short codes for the OS type:
-      l26 = Linux kernel 2.6+  (Ubuntu, Debian, CentOS, etc.)
-      win11 = Windows 11
-    This mapping is used when building the Proxmox create_vm payload.
-    """
-    mapping = {
-        "ubuntu-22.04": "l26",
-        "ubuntu-24.04": "l26",
-        "debian-12":    "l26",
-        "centos-9":     "l26",
-        "windows-11":   "win11",
-    }
-    return mapping.get(os_choice, "l26")
+    return _OS_MAP.get(os_choice, {}).get("ostype", "l26")
+
+
+def _map_os_to_iso(os_choice: str) -> str | None:
+    return _OS_MAP.get(os_choice, {}).get("iso")

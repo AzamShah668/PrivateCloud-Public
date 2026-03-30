@@ -1,0 +1,136 @@
+# =============================================================================
+# docker-compose.yml
+# =============================================================================
+# Starts the full application stack with a single command:
+#
+#   docker compose up --build
+#
+# Services defined here:
+#   postgres  — PostgreSQL 16 database
+#   backend   — FastAPI application (your code)
+#
+# ── How the .env file works ──────────────────────────────────────────────────
+# Docker Compose automatically reads a file called .env from the SAME
+# directory as this docker-compose.yml (i.e. the project root).
+#
+# That one root-level .env file serves two purposes at once:
+#
+#   1. Variable substitution in this YAML file itself.
+#      e.g. ${DB_PASSWORD} below is replaced with the value from .env
+#      before the YAML is parsed. This is how Postgres gets its password.
+#
+#   2. env_file: ./.env on the backend service injects the same variables
+#      into the container as real environment variables (os.environ).
+#      This is how the Python app reads DB_PASSWORD, JWT_SECRET_KEY, etc.
+#
+# Because BOTH services read from the same single .env file, the password
+# Postgres initialises with and the password the backend connects with are
+# always identical — no mismatch possible.
+#
+# Setup (first time):
+#   cp .env.example .env          ← copy the template
+#   # edit .env and set real values for DB_PASSWORD, JWT_SECRET_KEY, etc.
+#   docker compose up --build
+#
+# Typical workflow:
+#   First run:       docker compose up --build
+#   Subsequent:      docker compose up
+#   Stop:            docker compose down
+#   Stop + wipe DB:  docker compose down -v     (-v removes the data volume)
+#   Logs:            docker compose logs -f backend
+#   Shell in app:    docker compose exec backend bash
+# =============================================================================
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+
+    container_name: proxmox_postgres
+
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB:       ${DB_NAME:-proxmox_app}
+      POSTGRES_USER:     ${DB_USER:-postgres}
+      # ${DB_PASSWORD} is read from the root-level .env file by Docker Compose.
+      # The :-postgres suffix means "use 'postgres' if DB_PASSWORD is not set".
+      # This must match DB_PASSWORD that the backend uses to connect.
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    ports:
+      - "5432:5432"
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-proxmox_app}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+    networks:
+      - proxmox_net
+
+
+  # ── FastAPI Backend ─────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+
+    container_name: proxmox_backend
+
+    restart: unless-stopped
+
+    # Read the root-level .env file into the container as environment variables.
+    # This is the SAME file Docker Compose uses for ${...} substitution above,
+    # so DB_PASSWORD, JWT_SECRET_KEY, PROXMOX_* etc. are all consistent.
+    env_file:
+      - ./.env
+
+    environment:
+      # These two lines OVERRIDE what's in .env for the backend container only.
+      # Inside Docker Compose, containers reach each other by service name —
+      # the backend must use "postgres" (the service name) not "localhost".
+      DB_HOST: postgres
+      DB_PORT: "5432"
+
+    ports:
+      - "8000:8000"
+
+    depends_on:
+      postgres:
+        # Do not start the backend until Postgres passes its health check.
+        # Prevents "password authentication failed" errors caused by the
+        # backend starting before Postgres has finished initialising.
+        condition: service_healthy
+
+    networks:
+      - proxmox_net
+
+    # Hot-reload in development: mount your local source code so code changes
+    # are picked up immediately without a full docker compose up --build.
+    # Remove this volume (and the --reload flag below) for a production deploy.
+    volumes:
+      - ./backend/app:/home/appuser/app/app
+
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  proxmox_net:
+    driver: bridge
+
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  postgres_data:

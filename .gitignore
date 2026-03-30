@@ -1,0 +1,49 @@
+# =============================================================================
+# .gitignore — PrivateCloud
+# =============================================================================
+
+# ── Secrets / Environment ────────────────────────────────────────────────────
+# NEVER commit real credentials. Only .env.example (with placeholders) is safe.
+.env
+**/.env
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# ── Virtual environments (OS-specific binaries — never commit) ───────────────
+venv/
+.venv/
+env/
+**/venv/
+**/.venv/
+
+# ── Docker ───────────────────────────────────────────────────────────────────
+# Docker volumes / data directories created at runtime
+postgres_data/
+
+# ── Testing ──────────────────────────────────────────────────────────────────
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# ── IDE / Editor ─────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── OS files ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini

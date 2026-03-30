@@ -114,9 +114,10 @@ services:
 
     # Hot-reload in development: mount your local source code so code changes
     # are picked up immediately without a full docker compose up --build.
-    # Remove this volume (and the --reload flag below) for a production deploy.
+    # Remove these volumes (and the --reload flag below) for a production deploy.
     volumes:
       - ./backend/app:/home/appuser/app/app
+      - ./db:/home/appuser/app/db
 
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 

@@ -1,0 +1,29 @@
+# =============================================================================
+# requirements.txt — Python dependencies for the Proxmox Cloud VM API
+# =============================================================================
+# Install with:
+#   pip install -r requirements.txt
+#
+# Pin to exact versions before deploying to production. For now, using
+# minimum version constraints so you always get the latest compatible releases.
+# =============================================================================
+
+# ── Web Framework ─────────────────────────────────────────────────────────────
+fastapi>=0.110.0           # The API framework itself
+uvicorn[standard]>=0.29.0  # ASGI server that runs FastAPI
+
+# ── Database ──────────────────────────────────────────────────────────────────
+psycopg2-binary>=2.9       # PostgreSQL driver (binary = no need to compile)
+python-dotenv>=1.0         # Reads .env files into os.environ
+
+# ── Authentication ────────────────────────────────────────────────────────────
+python-jose[cryptography]>=3.3.0   # JWT encode / decode
+passlib[bcrypt]>=1.7.4             # Password hashing with bcrypt
+bcrypt==3.2.0                      # Pin bcrypt due to passlib compatibility bug
+
+# ── HTTP Requests (used by ProxmoxClient) ────────────────────────────────────
+requests>=2.31.0           # Simple HTTP library for Proxmox REST API calls
+urllib3>=2.0               # Used by requests; pin to avoid SSL warnings
+
+# ── Form data parsing (needed for OAuth2PasswordRequestForm) ─────────────────
+python-multipart>=0.0.9    # FastAPI uses this to parse form-encoded bodies

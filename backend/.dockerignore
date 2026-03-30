@@ -1,0 +1,42 @@
+# =============================================================================
+# .dockerignore
+# =============================================================================
+# Files and directories listed here are EXCLUDED from the Docker build context.
+# This means `COPY . .` in the Dockerfile will not include them.
+#
+# Why this matters:
+#   Without .dockerignore, the entire backend/ folder (including your local
+#   Windows venv with ~60 MB of compiled .pyd files) gets sent to the Docker
+#   daemon and copied into the image. Those Windows packages can't run on
+#   Linux and just waste space. This file prevents that.
+# =============================================================================
+
+# Local virtual environment (Windows packages can't run in the Linux container)
+venv/
+.venv/
+env/
+
+# Python cache files — regenerated automatically, not needed in the image
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment / secrets — should never be baked into an image
+.env
+*.env
+
+# IDE and OS clutter
+.idea/
+.vscode/
+*.DS_Store
+Thumbs.db
+
+# Git history — not needed at runtime
+.git/
+.gitignore
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage

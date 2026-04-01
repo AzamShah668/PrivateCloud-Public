@@ -27,7 +27,7 @@ import logging
 from datetime import datetime, timezone
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 
 from app.auth import get_current_user
 from db import database
@@ -102,9 +102,13 @@ def check_daily_quota(user: UserInDB) -> None:
     response_model=VMJobResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Request creation of a new Virtual Machine",
+    responses={
+        502: {"model": VMJobResponse, "description": "Proxmox failed to create the VM"},
+    },
 )
 def create_vm(
     vm_request: VMCreateRequest,
+    response: Response,
     current_user: UserInDB = Depends(get_current_user),
 ):
     """
@@ -164,6 +168,8 @@ def create_vm(
         "iso":       _map_os_to_iso(os_val),
     }
 
+    proxmox_failed = False
+
     try:
         # Update status to "running" before the Proxmox call
         database.update_vm_job(job_id=job_id, status=VMStatus.running.value)
@@ -181,12 +187,17 @@ def create_vm(
 
     except ProxmoxAPIError as exc:
         # ── Step 6b: failure — update job to "failed" ─────────────────────
+        proxmox_failed = True
         logger.error(f"Proxmox API error for job {job_id}: {exc}")
         database.update_vm_job(job_id=job_id, status=VMStatus.failed.value, error_message=str(exc))
 
     except Exception as exc:
+        proxmox_failed = True
         logger.error(f"Unexpected error for job {job_id}: {exc}")
         database.update_vm_job(job_id=job_id, status=VMStatus.failed.value, error_message=f"Unexpected server error: {exc}")
+
+    if proxmox_failed:
+        response.status_code = status.HTTP_502_BAD_GATEWAY
 
     # fetch updated job state to return
     updated_job = database.get_vm_job(job_id)

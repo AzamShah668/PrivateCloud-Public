@@ -16,7 +16,8 @@
 # Class design:
 #   ProxmoxClient is instantiated once (at app startup in main.py).
 #   authenticate() is called to get the ticket.
-#   After that: create_vm(), get_vm_status(), list_vms() can be called freely.
+#   After that: create_vm(), get_vm_status(), list_vms(), delete_vm()
+#   can be called freely.
 #
 #   Tickets expire after ~2 hours. The _ensure_authenticated() helper
 #   re-authenticates automatically if the ticket is stale.
@@ -68,6 +69,7 @@ class ProxmoxClient:
         client.authenticate()
         vmid = client.create_vm({...})
         status = client.get_vm_status(vmid, node="pve")
+        client.delete_vm(vmid, node="pve")
     """
 
     # Base URL of the Proxmox API. Port 8006 is the default.
@@ -77,10 +79,10 @@ class ProxmoxClient:
     TICKET_LIFETIME_MINUTES = 115
 
     def __init__(self):
-        self.host     = os.getenv("PROXMOX_HOST",     "192.168.1.100")
-        self.username = os.getenv("PROXMOX_USER",     "root@pam")
-        self.password = os.getenv("PROXMOX_PASSWORD", "")
-        self.default_node = os.getenv("PROXMOX_NODE", "pve")
+        self.host         = os.getenv("PROXMOX_HOST",     "192.168.1.100")
+        self.username     = os.getenv("PROXMOX_USER",     "root@pam")
+        self.password     = os.getenv("PROXMOX_PASSWORD", "")
+        self.default_node = os.getenv("PROXMOX_NODE",     "pve")
 
         # Disable SSL verification if you're using a self-signed cert
         # (common in university labs). Set PROXMOX_VERIFY_SSL=true in
@@ -90,8 +92,8 @@ class ProxmoxClient:
         )
 
         # These are populated by authenticate()
-        self._ticket:      Optional[str] = None
-        self._csrf_token:  Optional[str] = None
+        self._ticket:        Optional[str]      = None
+        self._csrf_token:    Optional[str]      = None
         self._ticket_expiry: Optional[datetime] = None
 
         # Suppress urllib3's "InsecureRequestWarning" when verify_ssl=False
@@ -206,6 +208,30 @@ class ProxmoxClient:
         except RequestException as exc:
             raise ProxmoxAPIError(f"POST {path} failed: {exc}") from exc
 
+    def _delete(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
+        """
+        Perform a DELETE request and return the 'data' field of the response.
+        DELETE requests need the CSRF token just like POST/PUT.
+
+        Args:
+            path:   the API path, e.g. "nodes/pve/qemu/101"
+            params: optional query-string parameters (e.g. purge flags)
+        """
+        self._ensure_authenticated()
+        try:
+            resp = requests.delete(
+                self._url(path),
+                params=params or {},
+                cookies=self._get_cookies(),
+                headers=self._get_headers(),   # CSRF required for DELETE
+                verify=self.verify_ssl,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            return resp.json().get("data")
+        except RequestException as exc:
+            raise ProxmoxAPIError(f"DELETE {path} failed: {exc}") from exc
+
     # =========================================================================
     # ── Public API Methods ────────────────────────────────────────────────────
     # =========================================================================
@@ -245,8 +271,8 @@ class ProxmoxClient:
         Raises:
             ProxmoxAPIError: if Proxmox returns an error.
         """
-        node    = config.pop("node", self.default_node)
-        vmid    = config["vmid"]
+        node = config.pop("node", self.default_node)
+        vmid = config["vmid"]
 
         # Proxmox qm create endpoint
         path = f"nodes/{node}/qemu"
@@ -263,11 +289,11 @@ class ProxmoxClient:
             # SCSI controller (virtio-scsi-pci is the modern recommended one)
             "scsihw": "virtio-scsi-pci",
 
-            # Root disk: e.g. "local-lvm:20" means 20GB on local-lvm storage
+            # Root disk: e.g. "local-lvm:20" means 20 GB on local-lvm storage
             "scsi0": f"{config.get('storage', 'local-lvm')}:{config.get('disk_size', '10')}",
 
             # Boot from the SCSI disk
-            "boot": "c",
+            "boot":     "c",
             "bootdisk": "scsi0",
 
             # Network interface (virtio = best performance on Linux guests)
@@ -328,6 +354,47 @@ class ProxmoxClient:
         logger.info(f"Stop task for VM {vmid}: {task_id}")
         return task_id
 
+    def delete_vm(self, vmid: int, node: Optional[str] = None) -> str:
+        """
+        Permanently delete (destroy) a VM from Proxmox, including its disk.
+        This operation is IRREVERSIBLE.
+
+        The VM should be stopped before calling this. If it is still running,
+        Proxmox will refuse the request and a ProxmoxAPIError will be raised.
+        Call stop_vm() first and wait for the stop task to complete.
+
+        The query params passed to Proxmox:
+          - purge=1                        removes the VM from all backup jobs /
+                                           replication configs on the cluster
+          - destroy-unreferenced-disks=1   wipes the actual disk image from
+                                           the storage pool so you don't leak space
+
+        Args:
+            vmid: the Proxmox VM ID to destroy
+            node: Proxmox node name (defaults to self.default_node)
+
+        Returns:
+            str: the Proxmox task ID (UPID). Poll get_task_status() to confirm
+                 completion if you need to wait for it.
+
+        Raises:
+            ProxmoxAPIError: if Proxmox rejects the request (VM still running,
+                             VM not found, permission denied, etc.)
+        """
+        node = node or self.default_node
+        path = f"nodes/{node}/qemu/{vmid}"
+
+        task_id = self._delete(
+            path,
+            params={
+                "purge":                       1,
+                "destroy-unreferenced-disks":  1,
+            },
+        )
+
+        logger.info(f"Delete task for VM {vmid} on node '{node}': {task_id}")
+        return task_id
+
     def list_vms(self, node: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         List all VMs on a node. Returns a list of dicts, one per VM.
@@ -341,7 +408,7 @@ class ProxmoxClient:
     def get_task_status(self, node: str, upid: str) -> Dict[str, Any]:
         """
         Check the status of an async Proxmox task by its UPID
-        (Unique Process ID, returned by create/start/stop operations).
+        (Unique Process ID, returned by create/start/stop/delete operations).
 
         Returns a dict with 'status' ('running' or 'stopped') and
         'exitstatus' ('OK' or an error message) when stopped.

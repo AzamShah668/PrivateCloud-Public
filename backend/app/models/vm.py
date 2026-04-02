@@ -9,14 +9,14 @@
 # and updates the row when Proxmox confirms success or failure.
 # So each row represents a *job request*, not just a static VM record.
 #
-# Status lifecycle (from your database design doc):
+# Status lifecycle:
 #
-#     queued → running → done
+#     queued → running → done → deleted
 #                     ↘ failed  (error_message populated)
 #
 # Contents of this file:
-#   1. VMJob         — SQLAlchemy ORM model (maps to vm_jobs table)
-#   2. AuditLog      — SQLAlchemy ORM model (maps to audit_logs table)
+#   1. VMStatus         — Enum for all possible vm_job states
+#   2. OS_Choice        — Enum for allowed OS templates
 #   3. VMCreateRequest  — Pydantic: what the client POSTs to create a VM
 #   4. VMJobResponse    — Pydantic: what the API returns about a job
 #   5. AuditLogResponse — Pydantic: what the API returns about an audit entry
@@ -38,19 +38,21 @@ from pydantic import BaseModel, field_validator
 
 class VMStatus(str, Enum):
     """
-    The four possible states a vm_job row can be in.
-    `str` as a base class means the enum value IS the string.
+    All possible states a vm_job row can be in.
+    `str` as a base class means the enum value IS the string, so you can
+    compare directly: job["status"] == VMStatus.done  →  True
     """
-    queued  = "queued"    # accepted by API, not yet processed
+    queued  = "queued"    # accepted by API, not yet sent to Proxmox
     running = "running"   # ProxmoxClient.create_vm() is in progress
-    done    = "done"      # Proxmox confirmed success
+    done    = "done"      # Proxmox confirmed VM creation success
     failed  = "failed"    # something went wrong; check error_message
+    deleted = "deleted"   # VM was successfully destroyed on Proxmox
 
 
 class OS_Choice(str, Enum):
     """
     Allowed operating system templates. Add more as you expand the catalog.
-    These map to Proxmox template names on the node.
+    These map to ISO file names stored on the Proxmox node.
     """
     ubuntu_22  = "ubuntu-22.04"
     ubuntu_24  = "ubuntu-24.04"
@@ -79,7 +81,7 @@ class VMCreateRequest(BaseModel):
     }
     """
     vm_name:    str
-    os_choice:  OS_Choice          # must be one of the allowed OS values
+    os_choice:  OS_Choice   # must be one of the allowed OS values
     cpu_cores:  int
     ram_mb:     int
     storage_gb: int
@@ -123,7 +125,7 @@ class VMCreateRequest(BaseModel):
 class VMJobResponse(BaseModel):
     """
     What the API returns for a vm_job row.
-    Maps 1-to-1 with the VMJob ORM model (minus internal DB details).
+    Maps 1-to-1 with the vm_jobs DB table (minus internal implementation details).
     """
     id:               int
     user_id:          int

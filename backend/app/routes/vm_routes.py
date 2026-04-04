@@ -46,8 +46,11 @@ from db import database
 from app.models.user import UserInDB
 from app.models.vm import (
     VMStatus,
+    VMAction,
     VMCreateRequest,
+    VMUpdateRequest,
     VMJobResponse,
+    VMEnrichedResponse,
 )
 from app.proxmox_client import ProxmoxClient, ProxmoxAPIError
 
@@ -260,23 +263,59 @@ def create_vm(
 
 @router.get(
     "/",
-    response_model=List[VMJobResponse],
-    summary="List all VMs belonging to the current user",
+    response_model=List[VMEnrichedResponse],
+    summary="List all VMs belonging to the current user with live status",
 )
 def list_my_vms(
     current_user: UserInDB = Depends(get_current_user),
 ):
     """
-    Returns all vm_job rows owned by the authenticated user, ordered newest-first.
+    Returns all vm_job rows owned by the authenticated user, enriched with
+    live Proxmox data (status, CPU/memory usage, uptime, network I/O).
 
-    No body required — the user identity comes from the JWT token.
+    Makes ONE bulk API call to Proxmox (list_vms) instead of hitting Proxmox
+    once per VM — much faster when the user has many VMs.
 
-    Note: returns the DB-cached status. For live Proxmox status on a single
-    VM, use GET /vms/{job_id} which queries Proxmox directly.
+    If Proxmox is unreachable, returns DB data with live_status="unknown".
     """
     jobs = database.list_user_vm_jobs(current_user.id)
     logger.debug(f"Listing {len(jobs)} VMs for user '{current_user.username}'")
-    return [VMJobResponse.model_validate(job) for job in jobs]
+
+    # ── Fetch all live VM statuses from Proxmox in one call ───────────────
+    live_status_map: dict = {}  # vmid → Proxmox status dict
+    try:
+        proxmox._ensure_authenticated()
+        all_vms = proxmox.list_vms()
+        # Build a lookup by vmid for fast matching
+        live_status_map = {vm["vmid"]: vm for vm in all_vms}
+    except Exception as exc:
+        # Proxmox unreachable — we still return DB data, just without live info
+        logger.warning(f"Could not fetch live VM list from Proxmox: {exc}")
+
+    # ── Merge DB records with live Proxmox data ──────────────────────────
+    enriched = []
+    for job in jobs:
+        # Start with the base DB fields
+        result = dict(job)
+
+        # Try to match this job's vmid to the live Proxmox data
+        vmid = job.get("vmid")
+        live = live_status_map.get(vmid) if vmid else None
+
+        if live:
+            result["live_status"] = live.get("status", "unknown")
+            result["cpu_usage"]   = live.get("cpu")           # fractional
+            result["mem_usage"]   = live.get("mem")            # bytes used
+            result["max_mem"]     = live.get("maxmem")         # bytes allocated
+            result["uptime"]      = live.get("uptime")         # seconds
+            result["netin"]       = live.get("netin")          # bytes
+            result["netout"]      = live.get("netout")         # bytes
+        else:
+            result["live_status"] = "unknown"
+
+        enriched.append(VMEnrichedResponse.model_validate(result))
+
+    return enriched
 
 
 # =============================================================================
@@ -337,6 +376,143 @@ def get_vm(
             )
 
     return VMJobResponse.model_validate(job)
+
+
+# =============================================================================
+# PATCH /vms/{job_id}  — Update a VM (start/stop/restart/resize)
+# =============================================================================
+
+@router.patch(
+    "/{job_id}",
+    response_model=VMJobResponse,
+    summary="Update a VM — start, stop, restart, or resize",
+    responses={
+        404: {"description": "VM job not found"},
+        403: {"description": "Not your VM"},
+        409: {"description": "VM is not in a valid state for this action"},
+        502: {"description": "Proxmox failed to execute the action"},
+    },
+)
+def update_vm(
+    job_id: int,
+    update: VMUpdateRequest,
+    response: Response,
+    current_user: UserInDB = Depends(get_current_user),
+):
+    """
+    Perform an action on an existing VM.
+
+    Supported actions:
+      - **start**: Boot a stopped VM
+      - **stop**: Hard-stop a running VM
+      - **restart**: Reboot a running VM
+      - **resize**: Change CPU cores and/or RAM (VM must be stopped)
+
+    Authorization: users can only update their own VMs. Admins can update any.
+    """
+
+    # ── Step 1: fetch job + ownership check ───────────────────────────────
+    job = database.get_vm_job(job_id)
+
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"VM job with id={job_id} not found.",
+        )
+
+    if current_user.role != "admin" and job["user_id"] != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to update this VM.",
+        )
+
+    # ── Step 2: guard — VM must be in 'done' state ───────────────────────
+    # Only a successfully created VM can be started/stopped/resized.
+    if job["status"] != VMStatus.done.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"VM job {job_id} is '{job['status']}'. "
+                "Only VMs with status 'done' can be updated."
+            ),
+        )
+
+    vmid = job["vmid"]
+    node = job["request_payload"].get("node", proxmox.default_node)
+    action = update.action
+
+    # ── Step 3: execute the action on Proxmox ─────────────────────────────
+    try:
+        proxmox._ensure_authenticated()
+
+        if action == VMAction.start:
+            proxmox.start_vm(vmid, node)
+            logger.info(f"VM {vmid} start requested by user '{current_user.username}'")
+
+        elif action == VMAction.stop:
+            proxmox.stop_vm(vmid, node)
+            logger.info(f"VM {vmid} stop requested by user '{current_user.username}'")
+
+        elif action == VMAction.restart:
+            proxmox.restart_vm(vmid, node)
+            logger.info(f"VM {vmid} restart requested by user '{current_user.username}'")
+
+        elif action == VMAction.resize:
+            # Build the config update — only include fields that were provided
+            config_update = {}
+            if update.cpu_cores is not None:
+                config_update["cores"] = update.cpu_cores
+            if update.ram_mb is not None:
+                config_update["memory"] = update.ram_mb
+
+            proxmox.update_vm_config(vmid, node, **config_update)
+            logger.info(
+                f"VM {vmid} resized by user '{current_user.username}': {config_update}"
+            )
+
+    except ProxmoxAPIError as exc:
+        logger.error(f"Proxmox error during {action.value} on VM {vmid}: {exc}")
+        response.status_code = status.HTTP_502_BAD_GATEWAY
+        # Don't change the job status — the VM still exists, the action just failed
+        log_event(
+            user_id=current_user.id,
+            action=f"vm.{action.value}",
+            target_type="vm_job",
+            target_id=str(job_id),
+            details={"vmid": vmid, "error": str(exc)},
+        )
+        return VMJobResponse.model_validate(database.get_vm_job(job_id))
+
+    except Exception as exc:
+        logger.error(f"Unexpected error during {action.value} on VM {vmid}: {exc}")
+        response.status_code = status.HTTP_502_BAD_GATEWAY
+        log_event(
+            user_id=current_user.id,
+            action=f"vm.{action.value}",
+            target_type="vm_job",
+            target_id=str(job_id),
+            details={"vmid": vmid, "error": str(exc)},
+        )
+        return VMJobResponse.model_validate(database.get_vm_job(job_id))
+
+    # ── Step 4: audit log ─────────────────────────────────────────────────
+    details: dict = {"vmid": vmid, "action": action.value}
+    if action == VMAction.resize:
+        if update.cpu_cores is not None:
+            details["cpu_cores"] = update.cpu_cores
+        if update.ram_mb is not None:
+            details["ram_mb"] = update.ram_mb
+
+    log_event(
+        user_id=current_user.id,
+        action=f"vm.{action.value}",
+        target_type="vm_job",
+        target_id=str(job_id),
+        details=details,
+    )
+
+    # ── Step 5: return the current job state ──────────────────────────────
+    return VMJobResponse.model_validate(database.get_vm_job(job_id))
 
 
 # =============================================================================

@@ -4,23 +4,23 @@
 # This file is the single bridge between your FastAPI app and the Proxmox
 # server. All HTTP calls to Proxmox go through this class.
 #
-# How Proxmox authentication works (Ticket-based):
-#   Proxmox has its own REST API at https://<host>:8006/api2/json/
-#   Step 1: POST /access/ticket with username+password
-#           → Proxmox returns a "ticket" (like a session cookie) and a
-#             CSRFPreventionToken.
-#   Step 2: All further requests must include:
-#           - Cookie: PVEAuthCookie=<ticket>
-#           - Header: CSRFPreventionToken: <csrf_token>   (for POST/PUT/DELETE)
+# Proxmox supports two authentication methods:
+#
+# 1. API Token (preferred — set PROXMOX_TOKEN_ID + PROXMOX_TOKEN_SECRET):
+#    - Created in Proxmox UI: Datacenter → Permissions → API Tokens
+#    - Every request includes: Authorization: PVEAPIToken=<id>=<secret>
+#    - Tokens never expire — no renewal needed, no cookies, no CSRF
+#    - Much simpler and more reliable for long-running services
+#
+# 2. Ticket-based (legacy fallback — used when token env vars are NOT set):
+#    - POST /access/ticket with username+password → ticket + CSRF token
+#    - Tickets expire after ~2 hours, auto-renewed by _ensure_authenticated()
+#    - Requires cookies on every request + CSRF header on POST/PUT/DELETE
 #
 # Class design:
 #   ProxmoxClient is instantiated once (at app startup in main.py).
-#   authenticate() is called to get the ticket.
-#   After that: create_vm(), get_vm_status(), list_vms(), delete_vm()
-#   can be called freely.
-#
-#   Tickets expire after ~2 hours. The _ensure_authenticated() helper
-#   re-authenticates automatically if the ticket is stale.
+#   If PROXMOX_TOKEN_ID is set → token auth, ready immediately.
+#   If not set → ticket auth, authenticate() must be called first.
 # =============================================================================
 
 import os
@@ -80,9 +80,18 @@ class ProxmoxClient:
 
     def __init__(self):
         self.host         = os.getenv("PROXMOX_HOST",     "192.168.1.100")
-        self.username     = os.getenv("PROXMOX_USER",     "root@pam")
-        self.password     = os.getenv("PROXMOX_PASSWORD", "")
         self.default_node = os.getenv("PROXMOX_NODE",     "pve")
+
+        # ── Auth method selection ────────────────────────────────────────
+        # If PROXMOX_TOKEN_ID is set → use API token auth (preferred).
+        # Otherwise → fall back to legacy ticket-based auth.
+        self._token_id:       Optional[str] = os.getenv("PROXMOX_TOKEN_ID")
+        self._token_secret:   Optional[str] = os.getenv("PROXMOX_TOKEN_SECRET")
+        self._use_token_auth: bool = bool(self._token_id and self._token_secret)
+
+        # Legacy ticket auth credentials (only needed if not using tokens)
+        self.username = os.getenv("PROXMOX_USER",     "root@pam")
+        self.password = os.getenv("PROXMOX_PASSWORD", "")
 
         # Disable SSL verification if you're using a self-signed cert
         # (common in university labs). Set PROXMOX_VERIFY_SSL=true in
@@ -91,16 +100,20 @@ class ProxmoxClient:
             os.getenv("PROXMOX_VERIFY_SSL", "false").lower() == "true"
         )
 
-        # These are populated by authenticate()
+        # These are populated by authenticate() — only used for ticket auth
         self._ticket:        Optional[str]      = None
         self._csrf_token:    Optional[str]      = None
         self._ticket_expiry: Optional[datetime] = None
 
         # Suppress urllib3's "InsecureRequestWarning" when verify_ssl=False
-        # (otherwise you get a warning for every single request)
         if not self.verify_ssl:
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        if self._use_token_auth:
+            logger.info("ProxmoxClient using API token auth (no ticket renewal needed).")
+        else:
+            logger.info("ProxmoxClient using legacy ticket auth (PROXMOX_TOKEN_ID not set).")
 
     # =========================================================================
     # ── Authentication ────────────────────────────────────────────────────────
@@ -109,11 +122,18 @@ class ProxmoxClient:
     def authenticate(self) -> None:
         """
         Log in to Proxmox and store the ticket + CSRF token.
-        Must be called before any other method.
+
+        With token auth this is a no-op — tokens are always valid.
+        With ticket auth this POSTs to /access/ticket to get a session.
 
         Raises:
-            ProxmoxAuthError: if Proxmox rejects the credentials.
+            ProxmoxAuthError: if Proxmox rejects the credentials (ticket mode only).
         """
+        # Token auth needs no login step — the token is sent with every request
+        if self._use_token_auth:
+            logger.debug("Token auth active — authenticate() is a no-op.")
+            return
+
         url = f"https://{self.host}:8006/api2/json/access/ticket"
 
         try:
@@ -121,9 +141,9 @@ class ProxmoxClient:
                 url,
                 data={"username": self.username, "password": self.password},
                 verify=self.verify_ssl,
-                timeout=10,  # seconds — don't hang forever
+                timeout=10,
             )
-            response.raise_for_status()  # raises if HTTP status >= 400
+            response.raise_for_status()
 
         except RequestException as exc:
             raise ProxmoxAuthError(
@@ -141,13 +161,17 @@ class ProxmoxClient:
         self._ticket_expiry = (
             datetime.now(timezone.utc) + timedelta(minutes=self.TICKET_LIFETIME_MINUTES)
         )
-        logger.info("ProxmoxClient authenticated successfully.")
+        logger.info("ProxmoxClient authenticated via ticket successfully.")
 
     def _ensure_authenticated(self) -> None:
         """
-        Check whether the ticket is still valid; re-authenticate if not.
-        Called automatically by all public methods.
+        Make sure we're ready to make API calls.
+        - Token auth: always ready (tokens don't expire).
+        - Ticket auth: re-authenticate if the ticket is missing or expired.
         """
+        if self._use_token_auth:
+            return  # tokens never expire
+
         if (
             self._ticket is None
             or self._ticket_expiry is None
@@ -161,14 +185,22 @@ class ProxmoxClient:
     # =========================================================================
 
     def _get_cookies(self) -> Dict[str, str]:
-        """Return the auth cookie dict needed for every Proxmox request."""
+        """Return the auth cookie dict for ticket-based requests."""
+        if self._use_token_auth:
+            return {}  # token auth uses headers, not cookies
         return {"PVEAuthCookie": self._ticket}
 
     def _get_headers(self) -> Dict[str, str]:
         """
-        Return headers needed for state-changing requests (POST/PUT/DELETE).
-        GET requests don't need the CSRF token.
+        Return headers needed for API requests.
+        - Token auth: Authorization header on ALL requests (GET, POST, DELETE, etc.)
+        - Ticket auth: CSRFPreventionToken on state-changing requests only
         """
+        if self._use_token_auth:
+            # Proxmox token format: PVEAPIToken=user@realm!tokenname=uuid-secret
+            return {
+                "Authorization": f"PVEAPIToken={self._token_id}={self._token_secret}"
+            }
         return {"CSRFPreventionToken": self._csrf_token}
 
     def _url(self, path: str) -> str:
@@ -183,6 +215,7 @@ class ProxmoxClient:
             resp = requests.get(
                 self._url(path),
                 cookies=self._get_cookies(),
+                headers=self._get_headers(),  # needed for token auth
                 verify=self.verify_ssl,
                 timeout=15,
             )
@@ -211,7 +244,7 @@ class ProxmoxClient:
     def _delete(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
         """
         Perform a DELETE request and return the 'data' field of the response.
-        DELETE requests need the CSRF token just like POST/PUT.
+        Token auth: Authorization header. Ticket auth: CSRF token + cookie.
 
         Args:
             path:   the API path, e.g. "nodes/pve/qemu/101"
@@ -223,7 +256,7 @@ class ProxmoxClient:
                 self._url(path),
                 params=params or {},
                 cookies=self._get_cookies(),
-                headers=self._get_headers(),   # CSRF required for DELETE
+                headers=self._get_headers(),
                 verify=self.verify_ssl,
                 timeout=30,
             )
@@ -353,6 +386,56 @@ class ProxmoxClient:
         task_id = self._post(path, {})
         logger.info(f"Stop task for VM {vmid}: {task_id}")
         return task_id
+
+    def restart_vm(self, vmid: int, node: Optional[str] = None) -> str:
+        """Reboot a running VM. Returns the Proxmox task ID (UPID)."""
+        node = node or self.default_node
+        path = f"nodes/{node}/qemu/{vmid}/status/reboot"
+        task_id = self._post(path, {})
+        logger.info(f"Reboot task for VM {vmid}: {task_id}")
+        return task_id
+
+    def get_vm_config(self, vmid: int, node: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get the full configuration of a VM (cores, memory, disks, etc.).
+        Useful for showing current state before/after a resize.
+        """
+        node = node or self.default_node
+        path = f"nodes/{node}/qemu/{vmid}/config"
+        return self._get(path)
+
+    def update_vm_config(self, vmid: int, node: Optional[str] = None, **config) -> None:
+        """
+        Update a VM's configuration (CPU, RAM, etc.).
+        The VM should be stopped for most config changes to take effect.
+
+        Args:
+            vmid: the Proxmox VM ID
+            node: Proxmox node name
+            **config: key-value pairs to update, e.g. cores=4, memory=4096
+        """
+        node = node or self.default_node
+        path = f"nodes/{node}/qemu/{vmid}/config"
+        logger.info(f"Updating VM {vmid} config: {config}")
+        self._post(path, config)
+        logger.info(f"VM {vmid} config updated successfully.")
+
+    def _put(self, path: str, data: Dict[str, Any]) -> Any:
+        """Perform a PUT request and return the 'data' field of the response."""
+        self._ensure_authenticated()
+        try:
+            resp = requests.put(
+                self._url(path),
+                data=data,
+                cookies=self._get_cookies(),
+                headers=self._get_headers(),
+                verify=self.verify_ssl,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            return resp.json().get("data")
+        except RequestException as exc:
+            raise ProxmoxAPIError(f"PUT {path} failed: {exc}") from exc
 
     def delete_vm(self, vmid: int, node: Optional[str] = None) -> str:
         """

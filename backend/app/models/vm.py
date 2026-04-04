@@ -122,6 +122,54 @@ class VMCreateRequest(BaseModel):
         return v
 
 
+class VMAction(str, Enum):
+    """
+    Allowed actions when updating a VM via PATCH /vms/{job_id}.
+    - start/stop/restart control the VM's power state
+    - resize changes CPU cores and/or RAM (VM must be stopped first)
+    """
+    start   = "start"
+    stop    = "stop"
+    restart = "restart"
+    resize  = "resize"
+
+
+class VMUpdateRequest(BaseModel):
+    """
+    Body the client must send to PATCH /vms/{job_id} to update a VM.
+
+    Example — power control:
+        {"action": "stop"}
+
+    Example — resize (VM must be stopped):
+        {"action": "resize", "cpu_cores": 4, "ram_mb": 4096}
+    """
+    action:    VMAction
+    cpu_cores: Optional[int] = None   # only used for resize (1-16)
+    ram_mb:    Optional[int] = None   # only used for resize (512-65536)
+
+    @field_validator("cpu_cores")
+    @classmethod
+    def cpu_cores_range(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and not (1 <= v <= 16):
+            raise ValueError("cpu_cores must be between 1 and 16.")
+        return v
+
+    @field_validator("ram_mb")
+    @classmethod
+    def ram_mb_range(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and not (512 <= v <= 65536):
+            raise ValueError("ram_mb must be between 512 and 65536.")
+        return v
+
+    def model_post_init(self, __context: Any) -> None:
+        """If action is resize, at least one of cpu_cores or ram_mb must be set."""
+        if self.action == VMAction.resize and self.cpu_cores is None and self.ram_mb is None:
+            raise ValueError(
+                "resize action requires at least one of cpu_cores or ram_mb."
+            )
+
+
 class VMJobResponse(BaseModel):
     """
     What the API returns for a vm_job row.
@@ -140,6 +188,23 @@ class VMJobResponse(BaseModel):
     updated_at:       datetime
 
     model_config = {"from_attributes": True}
+
+
+class VMEnrichedResponse(VMJobResponse):
+    """
+    Extended VM response that includes live data from Proxmox.
+    Used by GET /vms/ to show real-time status alongside the DB record.
+
+    If Proxmox is unreachable, live fields will be None and
+    live_status will be "unknown".
+    """
+    live_status: str                = "unknown"   # running/stopped/paused/unknown
+    cpu_usage:   Optional[float]    = None        # fractional (0.0 to num_cores)
+    mem_usage:   Optional[int]      = None        # bytes currently used
+    max_mem:     Optional[int]      = None        # bytes allocated
+    uptime:      Optional[int]      = None        # seconds
+    netin:       Optional[int]      = None        # bytes received
+    netout:      Optional[int]      = None        # bytes sent
 
 
 class AuditLogResponse(BaseModel):

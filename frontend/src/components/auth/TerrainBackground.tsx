@@ -1,0 +1,89 @@
+import { useRef, useMemo } from "react";
+import { Canvas, useFrame } from "@react-three/fiber";
+import * as THREE from "three";
+
+function TerrainMesh() {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const timeRef = useRef(0);
+
+  // Create a plane geometry with enough vertices for a visible terrain grid
+  const geometry = useMemo(() => {
+    const geo = new THREE.PlaneGeometry(30, 30, 80, 80);
+    geo.rotateX(-Math.PI * 0.55); // Tilt to show terrain perspective
+    return geo;
+  }, []);
+
+  // Animate the terrain vertices to undulate like a living topographic map
+  useFrame((_, delta) => {
+    if (!meshRef.current) return;
+    timeRef.current += delta * 0.4;
+    const t = timeRef.current;
+    const pos = meshRef.current.geometry.attributes.position!;
+    const arr = pos.array as Float32Array;
+
+    for (let i = 0; i < pos.count; i++) {
+      const x = arr[i * 3]!;
+      const y = arr[i * 3 + 1]!;
+      // Layer multiple sine waves for organic-feeling terrain
+      arr[i * 3 + 2] =
+        Math.sin(x * 0.4 + t) * 0.6 +
+        Math.sin(y * 0.3 + t * 0.7) * 0.4 +
+        Math.sin((x + y) * 0.2 + t * 0.5) * 0.3;
+    }
+    pos.needsUpdate = true;
+  });
+
+  return (
+    <mesh ref={meshRef} geometry={geometry} position={[0, -2, 0]}>
+      <meshBasicMaterial
+        wireframe
+        color="#3B7BF7"
+        transparent
+        opacity={0.15}
+      />
+    </mesh>
+  );
+}
+
+function GlowOrb() {
+  const meshRef = useRef<THREE.Mesh>(null);
+
+  useFrame(({ clock }) => {
+    if (!meshRef.current) return;
+    const t = clock.getElapsedTime();
+    meshRef.current.position.y = Math.sin(t * 0.5) * 0.5 + 1;
+    meshRef.current.position.x = Math.sin(t * 0.3) * 2;
+  });
+
+  return (
+    <mesh ref={meshRef} position={[0, 1, -5]}>
+      <sphereGeometry args={[0.3, 16, 16]} />
+      <meshBasicMaterial color="#3B7BF7" transparent opacity={0.3} />
+    </mesh>
+  );
+}
+
+export default function TerrainBackground() {
+  return (
+    <div className="fixed inset-0 z-0">
+      {/* Gradient overlay for depth — fades terrain into darkness at edges */}
+      <div
+        className="absolute inset-0 z-10 pointer-events-none"
+        style={{
+          background:
+            "radial-gradient(ellipse 70% 60% at 50% 55%, transparent 30%, #08090C 80%)",
+        }}
+      />
+      <Canvas
+        camera={{ position: [0, 5, 12], fov: 45 }}
+        style={{ background: "#08090C" }}
+        gl={{ antialias: true, alpha: false }}
+      >
+        <TerrainMesh />
+        <GlowOrb />
+        {/* Subtle ambient light — keeps the wireframe visible */}
+        <ambientLight intensity={0.5} />
+      </Canvas>
+    </div>
+  );
+}

@@ -80,13 +80,16 @@ class VMCreateRequest(BaseModel):
         "node": "pve"
     }
     """
-    vm_name:    str
-    os_choice:  OS_Choice   # must be one of the allowed OS values
-    cpu_cores:  int
-    ram_mb:     int
-    storage_gb: int
+    vm_name:      str
+    os_choice:    OS_Choice   # must be one of the allowed OS values
+    cpu_cores:    int
+    ram_mb:       int
+    storage_gb:   int
     # Proxmox node to create the VM on. Defaults to "pve" (the default node name).
-    node: str = "pve"
+    node:         str = "pve"
+    # When True and a cloud-init template exists for the chosen OS,
+    # clone the template instead of creating from ISO.
+    use_template: bool = False
 
     @field_validator("vm_name")
     @classmethod

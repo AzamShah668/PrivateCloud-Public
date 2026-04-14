@@ -26,6 +26,11 @@ env/
 **/venv/
 **/.venv/
 
+# ── Node / Frontend ─────────────────────────────────────────────────────────
+node_modules/
+**/node_modules/
+frontend/dist/
+
 # ── Docker ───────────────────────────────────────────────────────────────────
 # Docker volumes / data directories created at runtime
 postgres_data/

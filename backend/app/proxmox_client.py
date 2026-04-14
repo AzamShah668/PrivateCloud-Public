@@ -24,6 +24,7 @@
 # =============================================================================
 
 import os
+import re
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
@@ -43,6 +44,22 @@ logger = logging.getLogger(__name__)
 # Custom exceptions make it easy for routes to catch Proxmox-specific errors
 # and return the right HTTP status code to the client.
 # =============================================================================
+
+# =============================================================================
+# ── Golden template map ───────────────────────────────────────────────────────
+# Maps an OS choice string → Proxmox template VMID. When the user requests one
+# of these OSes, the backend *clones* the matching template instead of running
+# a slow ISO installer. The templates themselves are built on the Proxmox node
+# by `scripts/proxmox/SETUP_GOLDEN_IMAGE.sh` (run once, as root).
+#
+# If an OS is NOT in this map, the create-VM route falls back to the legacy
+# ISO install path (see `_OS_MAP` in routes/vm_routes.py).
+# =============================================================================
+
+CLOUD_TEMPLATE_MAP: Dict[str, int] = {
+    "ubuntu-24.04": 9000,
+}
+
 
 class ProxmoxAuthError(Exception):
     """Raised when authentication with Proxmox fails (wrong credentials, etc.)"""
@@ -325,10 +342,6 @@ class ProxmoxClient:
             # Root disk: e.g. "local-lvm:20" means 20 GB on local-lvm storage
             "scsi0": f"{config.get('storage', 'local-lvm')}:{config.get('disk_size', '10')}",
 
-            # Boot from the SCSI disk
-            "boot":     "c",
-            "bootdisk": "scsi0",
-
             # Network interface (virtio = best performance on Linux guests)
             "net0": "virtio,bridge=vmbr0",
         }
@@ -336,12 +349,145 @@ class ProxmoxClient:
         # Attach ISO if provided (for OS installation)
         if config.get("iso"):
             proxmox_params["ide2"] = f"{config['iso']},media=cdrom"
+            # Boot from CD-ROM first (d), then hard disk (c)
+            proxmox_params["boot"] = "order=ide2;scsi0"
+        else:
+            # No ISO — boot from hard disk only
+            proxmox_params["boot"] = "order=scsi0"
+            proxmox_params["bootdisk"] = "scsi0"
 
-        logger.info(f"Creating VM {vmid} on node '{node}' with name '{config.get('name')}'")
+        logger.info("Creating VM %s on node '%s' with name '%s'", vmid, node, config.get("name"))
         self._post(path, proxmox_params)
 
-        logger.info(f"VM {vmid} created successfully on node '{node}'.")
+        logger.info("VM %s created successfully on node '%s'.", vmid, node)
         return vmid
+
+    def clone_template(
+        self,
+        template_vmid: int,
+        new_vmid: int,
+        name: str,
+        node: Optional[str] = None,
+        full: bool = True,
+        storage: Optional[str] = None,
+    ) -> str:
+        """
+        Clone a Proxmox template into a new VM.
+
+        This is the fast-path replacement for ISO-based VM creation. The
+        template must already exist on Proxmox (built by
+        scripts/proxmox/SETUP_GOLDEN_IMAGE.sh). A full clone copies the
+        template's disk into a brand-new independent VM — typically takes
+        5-15 seconds because the disk is already sized small (~2 GB).
+
+        Args:
+            template_vmid: VMID of the existing template (e.g. 9000).
+            new_vmid:      VMID to assign to the new cloned VM.
+            name:          Display name for the new VM.
+            node:          Proxmox node (defaults to self.default_node).
+            full:          True → full clone (independent disk, slower but safe).
+                           False → linked clone (faster but depends on template).
+            storage:       Target storage pool for the clone's disk. Defaults
+                           to the template's storage.
+
+        Returns:
+            str: Proxmox task ID (UPID). Poll get_task_status() to wait for
+                 the clone to finish before configuring the new VM.
+
+        Raises:
+            ProxmoxAPIError: if the template is missing or the clone fails.
+        """
+        node = node or self.default_node
+        path = f"nodes/{node}/qemu/{template_vmid}/clone"
+
+        params: Dict[str, Any] = {
+            "newid": new_vmid,
+            "name":  name,
+            "full":  1 if full else 0,
+        }
+        if storage:
+            params["storage"] = storage
+
+        logger.info(
+            "Cloning template %s → VM %s (name='%s', full=%s) on node '%s'",
+            template_vmid, new_vmid, name, full, node,
+        )
+        task_id = self._post(path, params)
+        logger.info("Clone task for VM %s: %s", new_vmid, task_id)
+        return task_id
+
+    def resize_disk(
+        self,
+        vmid: int,
+        size_gb: int,
+        disk: str = "scsi0",
+        node: Optional[str] = None,
+    ) -> None:
+        """
+        Grow a VM's disk to the requested absolute size.
+
+        Proxmox's resize API only supports GROWING a disk, not shrinking.
+        The `size` parameter is absolute (e.g. "20G"), not an increment.
+
+        Args:
+            vmid:    the VM whose disk to resize.
+            size_gb: new disk size in GiB (absolute).
+            disk:    disk identifier — cloned templates use "scsi0" by default.
+            node:    Proxmox node (defaults to self.default_node).
+        """
+        node = node or self.default_node
+
+        # Guard: Proxmox only supports growing disks, not shrinking.
+        config = self.get_vm_config(vmid=vmid, node=node)
+        current_disk = config.get(disk, "")
+        if current_disk:
+            size_match = re.search(r"size=(\d+)G", str(current_disk))
+            if size_match:
+                current_size_gb = int(size_match.group(1))
+                if size_gb < current_size_gb:
+                    raise ProxmoxAPIError(
+                        f"Cannot shrink disk '{disk}' from {current_size_gb}G "
+                        f"to {size_gb}G. Proxmox only supports growing disks."
+                    )
+
+        path = f"nodes/{node}/qemu/{vmid}/resize"
+        params = {"disk": disk, "size": f"{size_gb}G"}
+        logger.info("Resizing VM %s disk %s → %sG", vmid, disk, size_gb)
+        self._put(path, params)
+        logger.info("VM %s disk %s resized to %sG", vmid, disk, size_gb)
+
+    def set_cloudinit_user(
+        self,
+        vmid: int,
+        ciuser: str,
+        cipassword: str,
+        node: Optional[str] = None,
+        ipconfig: str = "ip=dhcp",
+    ) -> None:
+        """
+        Configure cloud-init credentials on a cloned VM before it first boots.
+
+        Cloud-init reads these settings from the VM config at boot and sets up
+        the login user, password, and network automatically. This is how clones
+        of the golden template get per-VM identity.
+
+        Args:
+            vmid:       the cloned VM to configure.
+            ciuser:     Linux username to create (e.g. "ubuntu").
+            cipassword: initial SSH password for that user.
+            node:       Proxmox node (defaults to self.default_node).
+            ipconfig:   cloud-init network config string, default DHCP.
+        """
+        node = node or self.default_node
+        path = f"nodes/{node}/qemu/{vmid}/config"
+        params = {
+            "ciuser":     ciuser,
+            "cipassword": cipassword,
+            "ipconfig0":  ipconfig,
+        }
+        logger.info("Setting cloud-init user on VM %s (user='%s')", vmid, ciuser)
+        self._post(path, params)
+        logger.info("VM %s cloud-init user set", vmid)
 
     def get_vm_status(self, vmid: int, node: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -365,7 +511,7 @@ class ProxmoxClient:
         node = node or self.default_node
         path = f"nodes/{node}/qemu/{vmid}/status/current"
         data = self._get(path)
-        logger.debug(f"VM {vmid} status: {data.get('status')}")
+        logger.debug("VM %s status: %s", vmid, data.get("status"))
         return data
 
     def start_vm(self, vmid: int, node: Optional[str] = None) -> str:
@@ -376,7 +522,7 @@ class ProxmoxClient:
         node = node or self.default_node
         path = f"nodes/{node}/qemu/{vmid}/status/start"
         task_id = self._post(path, {})
-        logger.info(f"Start task for VM {vmid}: {task_id}")
+        logger.info("Start task for VM %s: %s", vmid, task_id)
         return task_id
 
     def stop_vm(self, vmid: int, node: Optional[str] = None) -> str:
@@ -384,7 +530,7 @@ class ProxmoxClient:
         node = node or self.default_node
         path = f"nodes/{node}/qemu/{vmid}/status/stop"
         task_id = self._post(path, {})
-        logger.info(f"Stop task for VM {vmid}: {task_id}")
+        logger.info("Stop task for VM %s: %s", vmid, task_id)
         return task_id
 
     def restart_vm(self, vmid: int, node: Optional[str] = None) -> str:
@@ -392,7 +538,7 @@ class ProxmoxClient:
         node = node or self.default_node
         path = f"nodes/{node}/qemu/{vmid}/status/reboot"
         task_id = self._post(path, {})
-        logger.info(f"Reboot task for VM {vmid}: {task_id}")
+        logger.info("Reboot task for VM %s: %s", vmid, task_id)
         return task_id
 
     def get_vm_config(self, vmid: int, node: Optional[str] = None) -> Dict[str, Any]:
@@ -416,9 +562,9 @@ class ProxmoxClient:
         """
         node = node or self.default_node
         path = f"nodes/{node}/qemu/{vmid}/config"
-        logger.info(f"Updating VM {vmid} config: {config}")
+        logger.info("Updating VM %s config: %s", vmid, config)
         self._post(path, config)
-        logger.info(f"VM {vmid} config updated successfully.")
+        logger.info("VM %s config updated successfully.", vmid)
 
     def _put(self, path: str, data: Dict[str, Any]) -> Any:
         """Perform a PUT request and return the 'data' field of the response."""
@@ -475,7 +621,7 @@ class ProxmoxClient:
             },
         )
 
-        logger.info(f"Delete task for VM {vmid} on node '{node}': {task_id}")
+        logger.info("Delete task for VM %s on node '%s': %s", vmid, node, task_id)
         return task_id
 
     def list_vms(self, node: Optional[str] = None) -> List[Dict[str, Any]]:

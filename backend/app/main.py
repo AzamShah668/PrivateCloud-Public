@@ -22,6 +22,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from db import database
 from app.routes.auth_routes import router as auth_router
@@ -83,6 +84,21 @@ app = FastAPI(
     docs_url="/docs",         # Swagger UI
     redoc_url="/redoc",       # ReDoc
     lifespan=lifespan,
+)
+
+
+# ---------------------------------------------------------------------------
+# CORS — allow the frontend dev server and production origin to call the API
+# ---------------------------------------------------------------------------
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",    # Vite dev server
+        "http://localhost:3000",    # Docker frontend (nginx)
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 

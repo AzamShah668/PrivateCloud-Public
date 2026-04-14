@@ -36,8 +36,9 @@
 # =============================================================================
 
 import logging
+import secrets
 import time
-from typing import List
+from typing import Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 
@@ -52,7 +53,7 @@ from app.models.vm import (
     VMJobResponse,
     VMEnrichedResponse,
 )
-from app.proxmox_client import ProxmoxClient, ProxmoxAPIError
+from app.proxmox_client import ProxmoxClient, ProxmoxAPIError, CLOUD_TEMPLATE_MAP
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,7 @@ def log_event(
             details=details,
         )
     except Exception as exc:
-        logger.error(f"Failed to write audit log [{action}]: {exc}")
+        logger.error("Failed to write audit log [%s]: %s", action, exc)
 
 
 # =============================================================================
@@ -136,7 +137,7 @@ def create_vm(
     vm_request: VMCreateRequest,
     response: Response,
     current_user: UserInDB = Depends(get_current_user),
-):
+) -> VMJobResponse:
     """
     Submit a VM creation request.
 
@@ -150,10 +151,9 @@ def create_vm(
 
     # ── Step 2: get the next available VMID from Proxmox ─────────────────
     try:
-        proxmox._ensure_authenticated()
         vmid = proxmox.get_next_vmid()
     except Exception as exc:
-        logger.error(f"Failed to get next VMID from Proxmox: {exc}")
+        logger.error("Failed to get next VMID from Proxmox: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Cannot reach Proxmox server. Please try again later.",
@@ -179,23 +179,12 @@ def create_vm(
     )
 
     logger.info(
-        f"VM job {job_id} created for user '{current_user.username}' "
-        f"(vmid={vmid}, os={vm_request.os_choice})"
+        "VM job %s created for user '%s' (vmid=%s, os=%s)",
+        job_id, current_user.username, vmid, vm_request.os_choice,
     )
 
     # ── Step 5: call Proxmox to actually create the VM ────────────────────
     os_val = vm_request.os_choice.value
-    proxmox_config = {
-        "node":      vm_request.node,
-        "vmid":      vmid,
-        "name":      vm_request.vm_name,
-        "ostype":    _map_os_to_proxmox_type(os_val),
-        "cores":     vm_request.cpu_cores,
-        "memory":    vm_request.ram_mb,
-        "storage":   "local-lvm",
-        "disk_size": str(vm_request.storage_gb),
-        "iso":       _map_os_to_iso(os_val),
-    }
 
     proxmox_failed = False
 
@@ -203,20 +192,43 @@ def create_vm(
         # Mark the job as running before the Proxmox call
         database.update_vm_job(job_id=job_id, status=VMStatus.running.value)
 
-        returned_vmid = proxmox.create_vm(proxmox_config)
+        # ── Step 5a: fast path — clone a golden template (only if requested) ─
+        # ── Step 5b: fallback — ISO install (default) ────────────────────
+        template_vmid = CLOUD_TEMPLATE_MAP.get(os_val) if vm_request.use_template else None
+        if template_vmid is not None:
+            provision_result = _provision_from_template(
+                template_vmid=template_vmid,
+                vm_request=vm_request,
+                new_vmid=vmid,
+            )
+            returned_vmid = provision_result["vmid"]
+        else:
+            proxmox_config = {
+                "node":      vm_request.node,
+                "vmid":      vmid,
+                "name":      vm_request.vm_name,
+                "ostype":    _map_os_to_proxmox_type(os_val),
+                "cores":     vm_request.cpu_cores,
+                "memory":    vm_request.ram_mb,
+                "storage":   "local-lvm",
+                "disk_size": str(vm_request.storage_gb),
+                "iso":       _map_os_to_iso(os_val),
+            }
+            returned_vmid = proxmox.create_vm(proxmox_config)
+            provision_result = {"vmid": returned_vmid, "result": "OK"}
 
         # ── Step 6a: success — update job to "done" ───────────────────────
         database.update_vm_job(
             job_id=job_id,
             status=VMStatus.done.value,
-            proxmox_response={"vmid": returned_vmid, "result": "OK"},
+            proxmox_response=provision_result,
         )
-        logger.info(f"VM job {job_id} completed. Proxmox vmid={returned_vmid}")
+        logger.info("VM job %s completed. Proxmox vmid=%s", job_id, returned_vmid)
 
     except ProxmoxAPIError as exc:
         # ── Step 6b: Proxmox-specific failure ─────────────────────────────
         proxmox_failed = True
-        logger.error(f"Proxmox API error for job {job_id}: {exc}")
+        logger.error("Proxmox API error for job %s: %s", job_id, exc)
         database.update_vm_job(
             job_id=job_id,
             status=VMStatus.failed.value,
@@ -226,7 +238,7 @@ def create_vm(
     except Exception as exc:
         # ── Step 6c: unexpected failure ────────────────────────────────────
         proxmox_failed = True
-        logger.error(f"Unexpected error for job {job_id}: {exc}")
+        logger.error("Unexpected error for job %s: %s", job_id, exc)
         database.update_vm_job(
             job_id=job_id,
             status=VMStatus.failed.value,
@@ -268,7 +280,7 @@ def create_vm(
 )
 def list_my_vms(
     current_user: UserInDB = Depends(get_current_user),
-):
+) -> List[VMEnrichedResponse]:
     """
     Returns all vm_job rows owned by the authenticated user, enriched with
     live Proxmox data (status, CPU/memory usage, uptime, network I/O).
@@ -279,18 +291,17 @@ def list_my_vms(
     If Proxmox is unreachable, returns DB data with live_status="unknown".
     """
     jobs = database.list_user_vm_jobs(current_user.id)
-    logger.debug(f"Listing {len(jobs)} VMs for user '{current_user.username}'")
+    logger.debug("Listing %s VMs for user '%s'", len(jobs), current_user.username)
 
     # ── Fetch all live VM statuses from Proxmox in one call ───────────────
     live_status_map: dict = {}  # vmid → Proxmox status dict
     try:
-        proxmox._ensure_authenticated()
         all_vms = proxmox.list_vms()
         # Build a lookup by vmid for fast matching
         live_status_map = {vm["vmid"]: vm for vm in all_vms}
     except Exception as exc:
         # Proxmox unreachable — we still return DB data, just without live info
-        logger.warning(f"Could not fetch live VM list from Proxmox: {exc}")
+        logger.warning("Could not fetch live VM list from Proxmox: %s", exc)
 
     # ── Merge DB records with live Proxmox data ──────────────────────────
     enriched = []
@@ -334,7 +345,7 @@ def list_my_vms(
 def get_vm(
     job_id: int,
     current_user: UserInDB = Depends(get_current_user),
-):
+) -> VMJobResponse:
     """
     Returns the vm_job row for `job_id`, enriched with a live status check
     from Proxmox if the job is in 'running' or 'done' state.
@@ -364,7 +375,6 @@ def get_vm(
     # Only bother hitting Proxmox if the VM should actually exist there.
     if job["status"] in (VMStatus.done.value, VMStatus.running.value) and job.get("vmid"):
         try:
-            proxmox._ensure_authenticated()
             live_status = proxmox.get_vm_status(job["vmid"])
             job["proxmox_response"] = {
                 **(job.get("proxmox_response") or {}),
@@ -372,7 +382,7 @@ def get_vm(
             }
         except Exception as exc:
             logger.warning(
-                f"Could not fetch live status for vmid={job['vmid']}: {exc}"
+                "Could not fetch live status for vmid=%s: %s", job["vmid"], exc
             )
 
     return VMJobResponse.model_validate(job)
@@ -398,7 +408,7 @@ def update_vm(
     update: VMUpdateRequest,
     response: Response,
     current_user: UserInDB = Depends(get_current_user),
-):
+) -> VMJobResponse:
     """
     Perform an action on an existing VM.
 
@@ -443,19 +453,17 @@ def update_vm(
 
     # ── Step 3: execute the action on Proxmox ─────────────────────────────
     try:
-        proxmox._ensure_authenticated()
-
         if action == VMAction.start:
             proxmox.start_vm(vmid, node)
-            logger.info(f"VM {vmid} start requested by user '{current_user.username}'")
+            logger.info("VM %s start requested by user '%s'", vmid, current_user.username)
 
         elif action == VMAction.stop:
             proxmox.stop_vm(vmid, node)
-            logger.info(f"VM {vmid} stop requested by user '{current_user.username}'")
+            logger.info("VM %s stop requested by user '%s'", vmid, current_user.username)
 
         elif action == VMAction.restart:
             proxmox.restart_vm(vmid, node)
-            logger.info(f"VM {vmid} restart requested by user '{current_user.username}'")
+            logger.info("VM %s restart requested by user '%s'", vmid, current_user.username)
 
         elif action == VMAction.resize:
             # Build the config update — only include fields that were provided
@@ -467,11 +475,12 @@ def update_vm(
 
             proxmox.update_vm_config(vmid, node, **config_update)
             logger.info(
-                f"VM {vmid} resized by user '{current_user.username}': {config_update}"
+                "VM %s resized by user '%s': %s",
+                vmid, current_user.username, config_update,
             )
 
     except ProxmoxAPIError as exc:
-        logger.error(f"Proxmox error during {action.value} on VM {vmid}: {exc}")
+        logger.error("Proxmox error during %s on VM %s: %s", action.value, vmid, exc)
         response.status_code = status.HTTP_502_BAD_GATEWAY
         # Don't change the job status — the VM still exists, the action just failed
         log_event(
@@ -484,7 +493,7 @@ def update_vm(
         return VMJobResponse.model_validate(database.get_vm_job(job_id))
 
     except Exception as exc:
-        logger.error(f"Unexpected error during {action.value} on VM {vmid}: {exc}")
+        logger.error("Unexpected error during %s on VM %s: %s", action.value, vmid, exc)
         response.status_code = status.HTTP_502_BAD_GATEWAY
         log_event(
             user_id=current_user.id,
@@ -534,7 +543,7 @@ def delete_vm(
     job_id: int,
     response: Response,
     current_user: UserInDB = Depends(get_current_user),
-):
+) -> VMJobResponse:
     """
     Permanently destroy the VM associated with `job_id`.
 
@@ -602,7 +611,7 @@ def delete_vm(
             },
         )
         logger.info(
-            f"VM job {job_id} was 'failed'; marked deleted without Proxmox call."
+            "VM job %s was 'failed'; marked deleted without Proxmox call.", job_id,
         )
         return VMJobResponse.model_validate(database.get_vm_job(job_id))
 
@@ -611,24 +620,21 @@ def delete_vm(
     # We check the live state before sending the stop to avoid an unnecessary
     # stop request (and its brief delay) when the VM is already stopped.
     vmid = job["vmid"]
+    node = job["request_payload"].get("node", proxmox.default_node)
 
     try:
-        proxmox._ensure_authenticated()
         live = proxmox.get_vm_status(vmid)
 
         if live.get("status") == "running":
-            logger.info(f"VM {vmid} is running — sending hard stop before deletion.")
-            proxmox.stop_vm(vmid)
-            # stop_vm() is async on Proxmox. We wait a few seconds for it to
-            # finish. In production you should poll get_task_status() in a
-            # loop until exitstatus == 'OK' instead of using a fixed sleep.
-            time.sleep(5)
-            logger.info(f"Stop wait complete for VM {vmid}. Proceeding to delete.")
+            logger.info("VM %s is running — sending hard stop before deletion.", vmid)
+            stop_upid = proxmox.stop_vm(vmid)
+            _wait_for_task(node=node, upid=stop_upid, timeout=30)
+            logger.info("Stop confirmed for VM %s. Proceeding to delete.", vmid)
 
     except ProxmoxAPIError as exc:
         # If we can't even check/stop the VM, abort rather than risk leaving
         # Proxmox in a broken state.
-        logger.error(f"Could not stop VM {vmid} before deletion: {exc}")
+        logger.error("Could not stop VM %s before deletion: %s", vmid, exc)
         database.update_vm_job(
             job_id=job_id,
             status=VMStatus.failed.value,
@@ -639,7 +645,7 @@ def delete_vm(
 
     except Exception as exc:
         # Non-Proxmox errors (network blip, etc.) — same behaviour: abort.
-        logger.error(f"Unexpected error stopping VM {vmid}: {exc}")
+        logger.error("Unexpected error stopping VM %s: %s", vmid, exc)
         database.update_vm_job(
             job_id=job_id,
             status=VMStatus.failed.value,
@@ -651,10 +657,10 @@ def delete_vm(
     # ── Step 5: delete the VM on Proxmox ──────────────────────────────────
     try:
         proxmox.delete_vm(vmid)
-        logger.info(f"Deletion task submitted to Proxmox for VM {vmid}.")
+        logger.info("Deletion task submitted to Proxmox for VM %s.", vmid)
 
     except ProxmoxAPIError as exc:
-        logger.error(f"Proxmox refused to delete VM {vmid}: {exc}")
+        logger.error("Proxmox refused to delete VM %s: %s", vmid, exc)
         database.update_vm_job(
             job_id=job_id,
             status=VMStatus.failed.value,
@@ -664,7 +670,7 @@ def delete_vm(
         return VMJobResponse.model_validate(database.get_vm_job(job_id))
 
     except Exception as exc:
-        logger.error(f"Unexpected error deleting VM {vmid}: {exc}")
+        logger.error("Unexpected error deleting VM %s: %s", vmid, exc)
         database.update_vm_job(
             job_id=job_id,
             status=VMStatus.failed.value,
@@ -689,7 +695,8 @@ def delete_vm(
     )
 
     logger.info(
-        f"VM job {job_id} (vmid={vmid}) deleted by user '{current_user.username}'."
+        "VM job %s (vmid=%s) deleted by user '%s'.",
+        job_id, vmid, current_user.username,
     )
 
     # ── Step 8: return the final state of the job ─────────────────────────
@@ -707,7 +714,7 @@ _OS_MAP = {
     },
     "ubuntu-24.04": {
         "ostype": "l26",
-        "iso":    "local:iso/ubuntu-24.04-live-server-amd64.iso",
+        "iso":    "local:iso/ubuntu-24.04.4-desktop-amd64.iso",
     },
     "debian-12": {
         "ostype": "l26",
@@ -732,3 +739,138 @@ def _map_os_to_proxmox_type(os_choice: str) -> str:
 def _map_os_to_iso(os_choice: str) -> str | None:
     """Return the Proxmox ISO path for the given OS choice, or None."""
     return _OS_MAP.get(os_choice, {}).get("iso")
+
+
+# =============================================================================
+# Helper: provision a VM by cloning a golden template
+# =============================================================================
+
+# Default cloud-init username for cloned VMs.
+_DEFAULT_CIUSER = "ubuntu"
+
+
+def _generate_ci_password(length: int = 16) -> str:
+    """Generate a unique random cloud-init password for each new VM clone."""
+    return secrets.token_urlsafe(length)
+
+# How long to wait for the Proxmox clone task to finish before giving up.
+_CLONE_TIMEOUT_SECONDS = 180
+_CLONE_POLL_INTERVAL   = 2
+
+
+def _wait_for_task(node: str, upid: str, timeout: int = _CLONE_TIMEOUT_SECONDS) -> None:
+    """
+    Block until a Proxmox task finishes or times out.
+
+    Raises ProxmoxAPIError if the task fails or does not finish in time.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        task = proxmox.get_task_status(node=node, upid=upid)
+        if task.get("status") == "stopped":
+            exit_status = task.get("exitstatus", "")
+            if exit_status != "OK":
+                raise ProxmoxAPIError(
+                    f"Proxmox task {upid} failed: {exit_status}"
+                )
+            return
+        time.sleep(_CLONE_POLL_INTERVAL)
+
+    raise ProxmoxAPIError(
+        f"Proxmox task {upid} did not finish within {timeout}s"
+    )
+
+
+def _provision_from_template(
+    template_vmid: int,
+    vm_request: VMCreateRequest,
+    new_vmid: int,
+) -> Dict[str, object]:
+    """
+    Fast path: clone a pre-built golden template, then resize disk and
+    configure cloud-init so the new VM boots with the user's requested
+    CPU/RAM/disk and a login account.
+
+    Steps:
+      1. Clone the template → new VMID (async, wait for task to finish).
+      2. Update CPU + memory on the new VM.
+      3. Resize scsi0 up to the requested disk size.
+      4. Set cloud-init user/password and DHCP networking.
+      5. Start the VM.
+
+    If any step after cloning fails, the orphaned clone is deleted before
+    re-raising the error so it doesn't waste resources on Proxmox.
+
+    Returns a dict with vmid, ci_username, and ci_password.
+    Raises ProxmoxAPIError on failure (caller converts to a failed job row).
+    """
+    node = vm_request.node
+
+    # 1. Clone (async task on Proxmox)
+    clone_upid = proxmox.clone_template(
+        template_vmid=template_vmid,
+        new_vmid=new_vmid,
+        name=vm_request.vm_name,
+        node=node,
+        full=True,
+    )
+    _wait_for_task(node=node, upid=clone_upid)
+
+    # Generate a unique password for this VM
+    ci_password = _generate_ci_password()
+
+    try:
+        # 2. Apply CPU + memory (template defaults to 2 cores / 2 GB)
+        proxmox.update_vm_config(
+            vmid=new_vmid,
+            node=node,
+            cores=vm_request.cpu_cores,
+            memory=vm_request.ram_mb,
+        )
+
+        # 3. Grow the cloned disk to match the requested size.
+        #    Template disks are small (~2 GB); resize is non-destructive.
+        proxmox.resize_disk(
+            vmid=new_vmid,
+            size_gb=vm_request.storage_gb,
+            disk="scsi0",
+            node=node,
+        )
+
+        # 4. Cloud-init credentials + DHCP — applied at first boot by cloud-init
+        proxmox.set_cloudinit_user(
+            vmid=new_vmid,
+            ciuser=_DEFAULT_CIUSER,
+            cipassword=ci_password,
+            node=node,
+        )
+
+        # 5. Start the VM so the user can actually use it
+        proxmox.start_vm(vmid=new_vmid, node=node)
+
+    except Exception:
+        # Rollback: delete the orphaned clone so it doesn't waste resources
+        logger.warning(
+            "Post-clone configuration failed for VM %s. Attempting cleanup.",
+            new_vmid,
+        )
+        try:
+            proxmox.delete_vm(vmid=new_vmid, node=node)
+        except Exception as cleanup_exc:
+            logger.error(
+                "Cleanup of orphaned VM %s also failed: %s",
+                new_vmid, cleanup_exc,
+            )
+        raise  # re-raise the original error so the caller marks the job as failed
+
+    logger.info(
+        "Provisioned VM %s by cloning template %s "
+        "(cores=%s, ram=%sMB, disk=%sG)",
+        new_vmid, template_vmid, vm_request.cpu_cores,
+        vm_request.ram_mb, vm_request.storage_gb,
+    )
+    return {
+        "vmid": new_vmid,
+        "ci_username": _DEFAULT_CIUSER,
+        "ci_password": ci_password,
+    }

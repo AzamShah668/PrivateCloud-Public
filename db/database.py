@@ -218,6 +218,59 @@ def get_user_by_id(user_id: int) -> dict | None:
             return cur.fetchone()
 
 
+def update_user_credentials(
+    user_id: int,
+    *,
+    username: str | None = None,
+    password_hash: str | None = None,
+    daily_quota: int | None = None,
+) -> None:
+    """
+    Update one or more fields on a user row.
+
+    Only the keyword arguments that are not None are included in the SET clause,
+    so the caller can change just the username, just the password, or both at once
+    without touching other columns.
+
+    Raises:
+        psycopg2.errors.UniqueViolation  — if the new username is already taken.
+        ValueError                       — if no fields were provided (nothing to update).
+    """
+    # Build the SET clause dynamically from whichever fields were supplied
+    updates: list[str]  = []
+    params:  list       = []
+
+    if username is not None:
+        updates.append("username = %s")
+        params.append(username)
+
+    if password_hash is not None:
+        updates.append("password_hash = %s")
+        params.append(password_hash)
+
+    if daily_quota is not None:
+        updates.append("daily_quota = %s")
+        params.append(daily_quota)
+
+    if not updates:
+        raise ValueError("update_user_credentials() called with nothing to update.")
+
+    params.append(user_id)   # for the WHERE clause
+
+    sql = f"UPDATE users SET {', '.join(updates)} WHERE id = %s"
+
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+        conn.commit()
+
+    logger.info(
+        "User id=%d updated: fields=%s",
+        user_id,
+        [u.split(" =")[0] for u in updates],
+    )
+
+
 # ---------------------------------------------------------------------------
 # VM job helpers
 # ---------------------------------------------------------------------------

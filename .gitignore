@@ -43,6 +43,10 @@ htmlcov/
 *.swo
 *~
 
+# ── Claude Code (local-only, invisible on GitHub) ───────────────────────────
+CLAUDE.md
+.claude/
+
 # ── OS files ─────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db

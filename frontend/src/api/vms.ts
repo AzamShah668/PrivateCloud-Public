@@ -44,8 +44,8 @@ export async function listVMs(): Promise<VMEnriched[]> {
   return api.get("vms/").json<VMEnriched[]>();
 }
 
-export async function getVM(jobId: number): Promise<VMJob> {
-  return api.get(`vms/${jobId}`).json<VMJob>();
+export async function getVM(jobId: number): Promise<VMEnriched> {
+  return api.get(`vms/${jobId}`).json<VMEnriched>();
 }
 
 export async function createVM(payload: CreateVMPayload): Promise<VMJob> {

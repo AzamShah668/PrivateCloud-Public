@@ -15,7 +15,7 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
         {label && (
           <label
             htmlFor={inputId}
-            className="text-xs font-medium text-secondary tracking-wide uppercase"
+            className="text-[10px] font-semibold text-muted tracking-[0.1em] uppercase"
             style={{ fontFamily: "var(--font-display)" }}
           >
             {label}
@@ -27,10 +27,11 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
           className={cn(
             "h-11 w-full rounded-[var(--radius-md)] px-4",
             "bg-input border border-border-subtle",
-            "text-sm text-primary placeholder:text-muted",
-            "outline-none transition-all duration-200",
-            "focus:border-border-focus focus:shadow-[0_0_0_3px_var(--color-accent-blue-glow)]",
-            error && "border-accent-red focus:border-accent-red focus:shadow-[0_0_0_3px_rgba(239,68,68,0.15)]",
+            "text-sm text-primary placeholder:text-muted/60",
+            "outline-none transition-all duration-300",
+            "focus:border-accent-cyan/50 focus:shadow-[0_0_0_3px_rgba(10,239,255,0.08),0_0_15px_rgba(10,239,255,0.05)]",
+            "font-mono",
+            error && "border-accent-red focus:border-accent-red focus:shadow-[0_0_0_3px_rgba(239,68,68,0.12)]",
             className,
           )}
           {...props}

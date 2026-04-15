@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { motion } from "motion/react";
-import { ArrowLeft, Monitor, Hash, Calendar } from "lucide-react";
+import { ArrowLeft, Monitor, Hash, Calendar, AlertTriangle } from "lucide-react";
 import Header from "@/components/layout/Header";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
@@ -11,12 +11,16 @@ import ActionBar from "@/components/vm-detail/ActionBar";
 import ResizeModal from "@/components/vm-detail/ResizeModal";
 import DeleteConfirm from "@/components/vm-detail/DeleteConfirm";
 import { useVM, useUpdateVM, useDeleteVM } from "@/hooks/use-vms";
-import type { VMEnriched } from "@/api/vms";
+
+/** Safely extract a number from an unknown payload value */
+function toNum(v: unknown, fallback: number): number {
+  return typeof v === "number" ? v : fallback;
+}
 
 export default function VMDetailPage() {
   const { jobId } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
-  const { data: vm, isLoading } = useVM(Number(jobId));
+  const { data: vm, isLoading, isError } = useVM(Number(jobId));
   const updateMutation = useUpdateVM();
   const deleteMutation = useDeleteVM();
 
@@ -27,6 +31,21 @@ export default function VMDetailPage() {
     return (
       <div className="flex items-center justify-center h-full">
         <Spinner className="h-8 w-8" />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-center gap-3">
+        <AlertTriangle className="h-8 w-8 text-accent-red" />
+        <p className="text-secondary">Failed to load VM details</p>
+        <Link to="/">
+          <Button variant="secondary">
+            <ArrowLeft className="h-4 w-4" />
+            Back to Dashboard
+          </Button>
+        </Link>
       </div>
     );
   }
@@ -45,13 +64,14 @@ export default function VMDetailPage() {
     );
   }
 
-  // Cast to VMEnriched — the useVM hook returns VMJob but the list endpoint enriches it.
-  // Fields may be undefined if fetched via single-get endpoint.
-  const enriched = vm as VMEnriched;
-  const liveStatus = enriched.live_status ?? vm.status;
+  // The list endpoint enriches with live_status, cpu_usage etc.
+  // The single-get endpoint returns VMJob — these fields may be undefined.
+  const liveStatus = ("live_status" in vm && typeof vm.live_status === "string")
+    ? vm.live_status
+    : vm.status;
   const payload = vm.request_payload ?? {};
-  const currentCpu = (payload.cpu_cores as number) ?? 2;
-  const currentRam = (payload.ram_mb as number) ?? 2048;
+  const currentCpu = toNum(payload.cpu_cores, 2);
+  const currentRam = toNum(payload.ram_mb, 2048);
 
   function handleAction(action: "start" | "stop" | "restart") {
     updateMutation.mutate({ jobId: vm!.id, payload: { action } });
@@ -88,7 +108,7 @@ export default function VMDetailPage() {
         }
       />
 
-      <main className="flex-1 overflow-y-auto p-8 space-y-8">
+      <main className="flex-1 overflow-y-auto p-6 space-y-6">
         {/* Actions */}
         <motion.div
           initial={{ opacity: 0, y: 16 }}
@@ -111,15 +131,21 @@ export default function VMDetailPage() {
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-          className="rounded-[var(--radius-lg)] bg-surface border border-border-subtle p-6"
+          className="glass-panel rounded-[var(--radius-lg)] p-6 relative overflow-hidden"
         >
+          <div
+            className="absolute top-0 left-6 right-6 h-[1px]"
+            style={{
+              background: "linear-gradient(90deg, transparent, rgba(10,239,255,0.1), transparent)",
+            }}
+          />
           <h3
-            className="text-sm font-semibold text-primary mb-4"
+            className="text-xs font-bold uppercase tracking-[0.15em] text-primary mb-4"
             style={{ fontFamily: "var(--font-display)" }}
           >
             Live Metrics
           </h3>
-          <LiveMetrics vm={enriched} />
+          <LiveMetrics vm={vm} />
         </motion.div>
 
         {/* Info Section */}
@@ -127,10 +153,16 @@ export default function VMDetailPage() {
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-          className="rounded-[var(--radius-lg)] bg-surface border border-border-subtle p-6"
+          className="glass-panel rounded-[var(--radius-lg)] p-6 relative overflow-hidden"
         >
+          <div
+            className="absolute top-0 left-6 right-6 h-[1px]"
+            style={{
+              background: "linear-gradient(90deg, transparent, rgba(10,239,255,0.1), transparent)",
+            }}
+          />
           <h3
-            className="text-sm font-semibold text-primary mb-4"
+            className="text-xs font-bold uppercase tracking-[0.15em] text-primary mb-4"
             style={{ fontFamily: "var(--font-display)" }}
           >
             Information
@@ -193,7 +225,7 @@ function InfoRow({
   label,
   value,
 }: {
-  icon: React.ReactNode;
+  icon: ReactNode;
   label: string;
   value: string;
 }) {
@@ -201,7 +233,7 @@ function InfoRow({
     <div className="flex items-start gap-3">
       <span className="text-muted mt-0.5">{icon}</span>
       <div>
-        <p className="text-[10px] text-muted uppercase tracking-wider">{label}</p>
+        <p className="text-[9px] text-muted uppercase tracking-[0.1em] font-semibold">{label}</p>
         <p className="text-sm text-primary font-mono">{value}</p>
       </div>
     </div>

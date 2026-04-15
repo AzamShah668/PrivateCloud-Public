@@ -27,10 +27,12 @@ createRoot(document.getElementById("root")!).render(
         position="top-right"
         toastOptions={{
           style: {
-            background: "var(--color-elevated)",
-            border: "1px solid var(--color-border-subtle)",
+            background: "rgba(10, 22, 40, 0.95)",
+            backdropFilter: "blur(16px)",
+            border: "1px solid rgba(10,239,255,0.1)",
             color: "var(--color-primary)",
             fontFamily: "var(--font-body)",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.4), 0 0 20px rgba(10,239,255,0.03)",
           },
         }}
       />

@@ -11,9 +11,18 @@ import CreateVMPage from "@/pages/CreateVMPage";
 import VMDetailPage from "@/pages/VMDetailPage";
 import NotFoundPage from "@/pages/NotFoundPage";
 
+// Admin pages
+import AdminDashboardPage from "@/pages/admin/AdminDashboardPage";
+import AdminVMsPage from "@/pages/admin/AdminVMsPage";
+import AdminUsersPage from "@/pages/admin/AdminUsersPage";
+import AdminAuditLogsPage from "@/pages/admin/AdminAuditLogsPage";
+import AdminSettingsPage from "@/pages/admin/AdminSettingsPage";
+
 // Layout
 import AppShell from "@/components/layout/AppShell";
+import AdminShell from "@/components/admin/AdminShell";
 import ProtectedRoute from "@/components/shared/ProtectedRoute";
+import AdminRoute from "@/components/shared/AdminRoute";
 
 export default function App() {
   const location = useLocation();
@@ -42,6 +51,17 @@ export default function App() {
             <Route index element={<DashboardPage />} />
             <Route path="/vms/create" element={<CreateVMPage />} />
             <Route path="/vms/:jobId" element={<VMDetailPage />} />
+          </Route>
+
+          {/* Admin routes — wrapped in AdminShell + AdminRoute guard */}
+          <Route element={<AdminRoute />}>
+            <Route path="/admin" element={<AdminShell />}>
+              <Route index element={<AdminDashboardPage />} />
+              <Route path="vms" element={<AdminVMsPage />} />
+              <Route path="users" element={<AdminUsersPage />} />
+              <Route path="audit-logs" element={<AdminAuditLogsPage />} />
+              <Route path="settings" element={<AdminSettingsPage />} />
+            </Route>
           </Route>
         </Route>
 

@@ -45,7 +45,19 @@ load_dotenv()
 # SECRET_KEY is used to sign the JWT. If someone gets this key they can forge
 # tokens. ALWAYS set a long, random value in production via environment variable.
 # Generate one with: python -c "import secrets; print(secrets.token_hex(32))"
-SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "CHANGE_ME_IN_PRODUCTION_use_a_long_random_string")
+_INSECURE_DEFAULT = "CHANGE_ME_IN_PRODUCTION_use_a_long_random_string"
+SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", _INSECURE_DEFAULT)
+
+if SECRET_KEY == _INSECURE_DEFAULT:
+    import warnings
+    warnings.warn(
+        "JWT_SECRET_KEY is not set — using insecure default. "
+        "Set JWT_SECRET_KEY in .env or environment. "
+        "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\"",
+        stacklevel=1,
+    )
+    # In production, fail hard instead of warning:
+    # raise RuntimeError("JWT_SECRET_KEY must be set in production")
 
 # The signing algorithm. HS256 (HMAC + SHA-256) is the most common choice.
 ALGORITHM: str = "HS256"

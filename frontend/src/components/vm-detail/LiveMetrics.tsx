@@ -26,25 +26,28 @@ function GaugeRing({
     <div className="flex flex-col items-center gap-2">
       <div className="relative h-28 w-28">
         <svg viewBox="0 0 100 100" className="h-full w-full -rotate-90">
-          <circle cx="50" cy="50" r={r} fill="none" stroke="var(--color-elevated)" strokeWidth="6" />
+          <circle cx="50" cy="50" r={r} fill="none" stroke="var(--color-elevated)" strokeWidth="5" />
           <circle
             cx="50"
             cy="50"
             r={r}
             fill="none"
             stroke={color}
-            strokeWidth="6"
+            strokeWidth="5"
             strokeLinecap="round"
             strokeDasharray={circ}
             strokeDashoffset={offset}
             className="transition-all duration-700 ease-out"
+            style={{
+              filter: `drop-shadow(0 0 6px ${color})`,
+            }}
           />
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-lg font-semibold font-mono text-primary">{children}</span>
+          <span className="text-lg font-bold font-mono text-primary">{children}</span>
         </div>
       </div>
-      <span className="text-[10px] text-muted uppercase tracking-wider">{label}</span>
+      <span className="text-[9px] text-muted uppercase tracking-[0.1em] font-semibold">{label}</span>
     </div>
   );
 }
@@ -95,7 +98,7 @@ export default function LiveMetrics({ vm }: LiveMetricsProps) {
       {/* Uptime */}
       <div className="flex items-center gap-2 text-xs text-secondary">
         <Clock className="h-3.5 w-3.5 text-muted" />
-        <span>Uptime: {formatUptime(vm.uptime)}</span>
+        <span className="font-mono">Uptime: {formatUptime(vm.uptime)}</span>
       </div>
     </div>
   );
@@ -111,11 +114,11 @@ function StatCard({
   value: string;
 }) {
   return (
-    <div className="rounded-[var(--radius-md)] bg-elevated border border-border-subtle p-3">
-      <span className="text-[10px] text-muted uppercase tracking-wider flex items-center gap-1 mb-1">
+    <div className="rounded-[var(--radius-md)] bg-elevated/50 border border-border-subtle p-3">
+      <span className="text-[9px] text-muted uppercase tracking-[0.1em] flex items-center gap-1 mb-1 font-semibold">
         {icon} {label}
       </span>
-      <span className="text-sm font-mono font-medium text-primary">{value}</span>
+      <span className="text-sm font-mono font-semibold text-primary">{value}</span>
     </div>
   );
 }

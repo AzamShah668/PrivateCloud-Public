@@ -218,10 +218,14 @@ def create_vm(
             provision_result = {"vmid": returned_vmid, "result": "OK"}
 
         # ── Step 6a: success — update job to "done" ───────────────────────
+        # Strip ci_password before persisting — credential is returned to the
+        # user once in the API response but must NOT be stored at rest.
+        stored_result = {k: v for k, v in provision_result.items()
+                         if k not in ("ci_password", "_ci_password_stripped")}
         database.update_vm_job(
             job_id=job_id,
             status=VMStatus.done.value,
-            proxmox_response=provision_result,
+            proxmox_response=stored_result,
         )
         logger.info("VM job %s completed. Proxmox vmid=%s", job_id, returned_vmid)
 
@@ -335,7 +339,7 @@ def list_my_vms(
 
 @router.get(
     "/{job_id}",
-    response_model=VMJobResponse,
+    response_model=VMEnrichedResponse,
     summary="Get details and live status of a specific VM job",
     responses={
         404: {"description": "VM job not found"},
@@ -345,7 +349,7 @@ def list_my_vms(
 def get_vm(
     job_id: int,
     current_user: UserInDB = Depends(get_current_user),
-) -> VMJobResponse:
+) -> VMEnrichedResponse:
     """
     Returns the vm_job row for `job_id`, enriched with a live status check
     from Proxmox if the job is in 'running' or 'done' state.
@@ -371,21 +375,34 @@ def get_vm(
             detail="You do not have permission to view this VM job.",
         )
 
+    result = dict(job)
+    
     # ── Optional: enrich with live Proxmox status ─────────────────────────
     # Only bother hitting Proxmox if the VM should actually exist there.
     if job["status"] in (VMStatus.done.value, VMStatus.running.value) and job.get("vmid"):
         try:
-            live_status = proxmox.get_vm_status(job["vmid"])
-            job["proxmox_response"] = {
+            live = proxmox.get_vm_status(job["vmid"])
+            result["live_status"] = live.get("status", "unknown")
+            result["cpu_usage"]   = live.get("cpu")
+            result["mem_usage"]   = live.get("mem")
+            result["max_mem"]     = live.get("maxmem")
+            result["uptime"]      = live.get("uptime")
+            result["netin"]       = live.get("netin")
+            result["netout"]      = live.get("netout")
+            
+            result["proxmox_response"] = {
                 **(job.get("proxmox_response") or {}),
-                "live_status": live_status,
+                "live_status": live,
             }
         except Exception as exc:
             logger.warning(
                 "Could not fetch live status for vmid=%s: %s", job["vmid"], exc
             )
+            result["live_status"] = "unknown"
+    else:
+        result["live_status"] = "unknown"
 
-    return VMJobResponse.model_validate(job)
+    return VMEnrichedResponse.model_validate(result)
 
 
 # =============================================================================

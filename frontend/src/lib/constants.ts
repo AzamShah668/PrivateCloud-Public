@@ -9,7 +9,7 @@ export const OS_OPTIONS = [
 export type OSValue = (typeof OS_OPTIONS)[number]["value"];
 
 export const STATUS_COLORS: Record<string, string> = {
-  running: "var(--color-accent-cyan)",
+  running: "var(--color-accent-green)",
   stopped: "var(--color-muted)",
   paused: "var(--color-accent-amber)",
   queued: "var(--color-accent-amber)",

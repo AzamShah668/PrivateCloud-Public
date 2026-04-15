@@ -1,12 +1,12 @@
 import { Outlet } from "react-router-dom";
 import { motion } from "motion/react";
-import { Search, Wifi } from "lucide-react";
-import Sidebar from "./Sidebar";
-import BackgroundEffects from "./BackgroundEffects";
+import { Search, Wifi, Shield } from "lucide-react";
+import AdminSidebar from "./AdminSidebar";
+import BackgroundEffects from "@/components/layout/BackgroundEffects";
 import { useAuthStore } from "@/stores/auth-store";
 import { useState, useEffect } from "react";
 
-function TopBar() {
+function AdminTopBar() {
   const user = useAuthStore((s) => s.user);
   const [time, setTime] = useState(new Date());
 
@@ -22,43 +22,50 @@ function TopBar() {
       transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
       className="flex items-center justify-between px-6 h-14 border-b border-border-subtle bg-surface/40 backdrop-blur-md shrink-0"
     >
-      {/* Left: Welcome + Region */}
+      {/* Left: Admin badge + Welcome */}
       <div className="flex items-center gap-4">
-        <span className="text-sm text-secondary" style={{ fontFamily: "var(--font-body)" }}>
-          Welcome back,{" "}
-          <span className="text-primary font-semibold">
-            {user?.username ?? "User"}
-          </span>
-        </span>
-        <span className="text-border-subtle">|</span>
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-muted uppercase tracking-wider" style={{ fontFamily: "var(--font-display)" }}>
-            Active Region:
-          </span>
-          <span className="text-xs font-mono font-semibold text-accent-cyan px-2 py-0.5 rounded-[var(--radius-sm)] border border-accent-cyan/20 bg-accent-cyan/5">
-            US-EAST-01
+        <div className="flex items-center gap-2 px-2.5 py-1 rounded-[var(--radius-sm)] border border-accent-amber/20 bg-accent-amber/5">
+          <Shield className="h-3.5 w-3.5 text-accent-amber" />
+          <span
+            className="text-[10px] font-bold tracking-[0.1em] text-accent-amber uppercase"
+            style={{ fontFamily: "var(--font-display)" }}
+          >
+            Admin Panel
           </span>
         </div>
+        <span className="text-border-subtle">|</span>
+        <span
+          className="text-sm text-secondary"
+          style={{ fontFamily: "var(--font-body)" }}
+        >
+          Welcome,{" "}
+          <span className="text-primary font-semibold">
+            {user?.username ?? "Admin"}
+          </span>
+        </span>
       </div>
 
       {/* Center: Search */}
-      <div className="flex items-center gap-2 px-3 h-8 rounded-[var(--radius-md)] border border-border-subtle bg-elevated/50 min-w-[240px] transition-all duration-200 focus-within:border-accent-cyan/30 focus-within:bg-elevated focus-within:shadow-[0_0_12px_rgba(10,239,255,0.08)]">
+      <div className="flex items-center gap-2 px-3 h-8 rounded-[var(--radius-md)] border border-border-subtle bg-elevated/50 min-w-[260px] transition-all duration-200 focus-within:border-accent-cyan/30 focus-within:bg-elevated focus-within:shadow-[0_0_12px_rgba(10,239,255,0.08)]">
         <Search className="h-3.5 w-3.5 text-muted" />
         <input
           type="text"
-          placeholder="Search instances..."
+          placeholder="Search users, VMs, logs..."
           className="bg-transparent text-xs text-primary placeholder:text-muted outline-none flex-1 font-mono"
         />
       </div>
 
-      {/* Right: Status + Time */}
+      {/* Right: System status + Time */}
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2 px-3 py-1 rounded-[var(--radius-sm)] border border-border-subtle bg-elevated/30">
-          <span className="text-[10px] text-secondary uppercase tracking-wider" style={{ fontFamily: "var(--font-display)" }}>
-            Status:
+          <span
+            className="text-[10px] text-secondary uppercase tracking-wider"
+            style={{ fontFamily: "var(--font-display)" }}
+          >
+            Cluster:
           </span>
           <span className="text-xs font-mono font-semibold text-accent-green flex items-center gap-1.5">
-            Online
+            Healthy
             <span className="relative flex h-2 w-2">
               <span className="absolute inset-0 rounded-full bg-accent-green animate-pulse-status" />
               <span className="relative h-2 w-2 rounded-full bg-accent-green" />
@@ -74,19 +81,14 @@ function TopBar() {
   );
 }
 
-export default function AppShell() {
+export default function AdminShell() {
   return (
     <div className="flex h-dvh bg-deepest overflow-hidden">
-      {/* Background effects layer */}
       <BackgroundEffects />
-
-      <Sidebar />
+      <AdminSidebar />
       <div className="flex-1 flex flex-col overflow-hidden relative">
-        {/* Subtle grid background */}
         <div className="absolute inset-0 grid-bg pointer-events-none opacity-30" />
-        
-        <TopBar />
-        
+        <AdminTopBar />
         <main className="flex-1 flex flex-col overflow-y-auto relative z-10">
           <motion.div
             initial={{ opacity: 0, y: 8 }}

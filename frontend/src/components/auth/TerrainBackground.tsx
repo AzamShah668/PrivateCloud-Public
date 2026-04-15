@@ -37,9 +37,9 @@ function TerrainMesh() {
     <mesh ref={meshRef} geometry={geometry} position={[0, -2, 0]}>
       <meshBasicMaterial
         wireframe
-        color="#3B7BF7"
+        color="#0AEFFF"
         transparent
-        opacity={0.15}
+        opacity={0.12}
       />
     </mesh>
   );
@@ -58,7 +58,26 @@ function GlowOrb() {
   return (
     <mesh ref={meshRef} position={[0, 1, -5]}>
       <sphereGeometry args={[0.3, 16, 16]} />
-      <meshBasicMaterial color="#3B7BF7" transparent opacity={0.3} />
+      <meshBasicMaterial color="#0AEFFF" transparent opacity={0.25} />
+    </mesh>
+  );
+}
+
+function SecondaryOrb() {
+  const meshRef = useRef<THREE.Mesh>(null);
+
+  useFrame(({ clock }) => {
+    if (!meshRef.current) return;
+    const t = clock.getElapsedTime();
+    meshRef.current.position.y = Math.cos(t * 0.4) * 0.8 + 0.5;
+    meshRef.current.position.x = Math.cos(t * 0.25) * 3;
+    meshRef.current.position.z = Math.sin(t * 0.15) * 2 - 4;
+  });
+
+  return (
+    <mesh ref={meshRef} position={[2, 0.5, -4]}>
+      <sphereGeometry args={[0.2, 12, 12]} />
+      <meshBasicMaterial color="#3B82F6" transparent opacity={0.2} />
     </mesh>
   );
 }
@@ -71,16 +90,17 @@ export default function TerrainBackground() {
         className="absolute inset-0 z-10 pointer-events-none"
         style={{
           background:
-            "radial-gradient(ellipse 70% 60% at 50% 55%, transparent 30%, #08090C 80%)",
+            "radial-gradient(ellipse 70% 60% at 50% 55%, transparent 30%, #060B14 80%)",
         }}
       />
       <Canvas
         camera={{ position: [0, 5, 12], fov: 45 }}
-        style={{ background: "#08090C" }}
+        style={{ background: "#060B14" }}
         gl={{ antialias: true, alpha: false }}
       >
         <TerrainMesh />
         <GlowOrb />
+        <SecondaryOrb />
         {/* Subtle ambient light — keeps the wireframe visible */}
         <ambientLight intensity={0.5} />
       </Canvas>

@@ -8,8 +8,8 @@ export default function CreateVMPage() {
   return (
     <div className="flex flex-col h-full">
       <Header
-        title="Create Virtual Machine"
-        subtitle="Configure and deploy a new VM to your cluster"
+        title="Deploy Compute Instance"
+        subtitle="Configure and deploy a new instance to your cluster"
         actions={
           <Link to="/">
             <Button variant="ghost" size="sm">
@@ -19,7 +19,7 @@ export default function CreateVMPage() {
           </Link>
         }
       />
-      <main className="flex-1 overflow-y-auto p-8">
+      <main className="flex-1 overflow-y-auto p-6">
         <CreateVMForm />
       </main>
     </div>

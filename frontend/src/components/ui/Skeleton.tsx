@@ -8,8 +8,9 @@ export default function Skeleton({ className }: SkeletonProps) {
   return (
     <div
       className={cn(
-        "rounded-[var(--radius-md)] bg-elevated",
+        "rounded-[var(--radius-md)]",
         "animate-shimmer bg-gradient-to-r from-elevated via-input to-elevated",
+        "border border-border-subtle/30",
         className,
       )}
     />

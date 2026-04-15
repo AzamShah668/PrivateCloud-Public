@@ -32,7 +32,15 @@ export default function VMCard({ vm, index }: VMCardProps) {
         ease: [0.16, 1, 0.3, 1],
       }}
     >
-      <Card hoverable onClick={() => navigate(`/vms/${vm.id}`)} className="p-5">
+      <Card hoverable onClick={() => navigate(`/vms/${vm.id}`)} className="p-5 relative overflow-hidden">
+        {/* Accent line */}
+        <div
+          className="absolute top-0 left-4 right-4 h-[1px]"
+          style={{
+            background: "linear-gradient(90deg, transparent, rgba(10,239,255,0.15), transparent)",
+          }}
+        />
+
         {/* Top row: name + status */}
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center gap-2.5 min-w-0">
@@ -44,7 +52,7 @@ export default function VMCard({ vm, index }: VMCardProps) {
               >
                 {vm.vm_name}
               </h3>
-              <p className="text-xs text-muted font-mono">VMID {vm.vmid}</p>
+              <p className="text-[10px] text-muted font-mono">VMID {vm.vmid}</p>
             </div>
           </div>
           <StatusBadge status={vm.status} liveStatus={vm.live_status} />
@@ -52,7 +60,7 @@ export default function VMCard({ vm, index }: VMCardProps) {
 
         {/* OS badge */}
         <div className="mb-4">
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[var(--radius-sm)] bg-elevated text-xs text-secondary border border-border-subtle">
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-[var(--radius-sm)] bg-elevated/80 text-[10px] text-secondary border border-border-subtle font-mono">
             <Monitor className="h-3 w-3" />
             {vm.os_choice}
           </span>
@@ -61,7 +69,7 @@ export default function VMCard({ vm, index }: VMCardProps) {
         {/* Metrics grid */}
         <div className="grid grid-cols-3 gap-3">
           <div className="flex flex-col gap-0.5">
-            <span className="text-[10px] text-muted uppercase tracking-wider flex items-center gap-1">
+            <span className="text-[9px] text-muted uppercase tracking-wider flex items-center gap-1">
               <Cpu className="h-3 w-3" /> CPU
             </span>
             <span className="text-xs font-medium text-primary font-mono">
@@ -69,7 +77,7 @@ export default function VMCard({ vm, index }: VMCardProps) {
             </span>
           </div>
           <div className="flex flex-col gap-0.5">
-            <span className="text-[10px] text-muted uppercase tracking-wider flex items-center gap-1">
+            <span className="text-[9px] text-muted uppercase tracking-wider flex items-center gap-1">
               <MemoryStick className="h-3 w-3" /> RAM
             </span>
             <span className="text-xs font-medium text-primary font-mono">
@@ -79,7 +87,7 @@ export default function VMCard({ vm, index }: VMCardProps) {
             </span>
           </div>
           <div className="flex flex-col gap-0.5">
-            <span className="text-[10px] text-muted uppercase tracking-wider flex items-center gap-1">
+            <span className="text-[9px] text-muted uppercase tracking-wider flex items-center gap-1">
               <Clock className="h-3 w-3" /> Uptime
             </span>
             <span className="text-xs font-medium text-primary font-mono">

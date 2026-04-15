@@ -8,15 +8,22 @@ interface HeaderProps {
 
 export default function Header({ title, subtitle, actions }: HeaderProps) {
   return (
-    <header className="flex items-center justify-between px-8 h-16 border-b border-border-subtle bg-surface/50 backdrop-blur-sm">
+    <header className="flex items-center justify-between px-6 h-14 border-b border-border-subtle/50 bg-surface/30 backdrop-blur-sm relative overflow-hidden">
+      {/* Subtle accent line at top */}
+      <div
+        className="absolute top-0 left-0 right-0 h-[1px]"
+        style={{
+          background: "linear-gradient(90deg, transparent, rgba(10,239,255,0.1), transparent)",
+        }}
+      />
       <div>
         <h1
-          className="text-lg font-semibold text-primary"
+          className="text-lg font-bold text-primary"
           style={{ fontFamily: "var(--font-display)" }}
         >
           {title}
         </h1>
-        {subtitle && <p className="text-xs text-secondary mt-0.5">{subtitle}</p>}
+        {subtitle && <p className="text-xs text-muted mt-0.5">{subtitle}</p>}
       </div>
       {actions && <div className="flex items-center gap-3">{actions}</div>}
     </header>

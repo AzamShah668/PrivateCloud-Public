@@ -31,22 +31,28 @@ export default function VMList({ vms, isLoading }: VMListProps) {
         transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
         className="flex flex-col items-center justify-center py-20 text-center"
       >
-        <div className="h-20 w-20 rounded-full bg-accent-blue/5 border border-accent-blue/10 flex items-center justify-center mb-6">
-          <Cloud className="h-10 w-10 text-accent-blue/40" />
+        <div
+          className="h-20 w-20 rounded-full flex items-center justify-center mb-6"
+          style={{
+            background: "linear-gradient(135deg, rgba(10,239,255,0.05), rgba(59,130,246,0.03))",
+            border: "1px solid rgba(10,239,255,0.1)",
+          }}
+        >
+          <Cloud className="h-10 w-10 text-accent-cyan/40" />
         </div>
         <h2
-          className="text-xl font-semibold text-primary mb-2"
+          className="text-xl font-bold text-primary mb-2"
           style={{ fontFamily: "var(--font-display)" }}
         >
-          No virtual machines yet
+          No instances deployed
         </h2>
         <p className="text-sm text-secondary mb-6 max-w-sm">
-          Create your first VM to get started with your private cloud infrastructure.
+          Deploy your first compute instance to start building your private cloud infrastructure.
         </p>
         <Link to="/vms/create">
           <Button size="lg">
             <PlusCircle className="h-4 w-4" />
-            Create your first VM
+            Deploy first instance
           </Button>
         </Link>
       </motion.div>

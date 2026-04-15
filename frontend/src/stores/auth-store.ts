@@ -15,6 +15,9 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set) => ({
   token: localStorage.getItem(TOKEN_KEY),
   user: null,
+  // Token presence gates initial auth state. The actual user profile
+  // is hydrated by useCurrentUser() in ProtectedRoute. A stale/expired
+  // token will trigger a 401 → logout via the API interceptor.
   isAuthenticated: !!localStorage.getItem(TOKEN_KEY),
 
   login: (token) => {

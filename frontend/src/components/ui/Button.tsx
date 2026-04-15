@@ -13,18 +13,20 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantStyles: Record<Variant, string> = {
   primary: [
-    "bg-accent-blue text-white",
+    "text-white",
     "hover:brightness-110",
-    "shadow-[0_0_20px_var(--color-accent-blue-glow)]",
     "relative overflow-hidden",
+    "btn-glow",
   ].join(" "),
   secondary: [
     "bg-elevated text-primary border border-border-subtle",
     "hover:bg-input hover:border-secondary/30",
+    "btn-glow-soft",
   ].join(" "),
   ghost: [
     "bg-transparent text-secondary",
     "hover:bg-elevated hover:text-primary",
+    "nav-glow",
   ].join(" "),
   danger: [
     "bg-transparent text-accent-red border border-accent-red/30",
@@ -52,13 +54,26 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         sizeStyles[size],
         className,
       )}
+      style={
+        variant === "primary"
+          ? {
+              background: "linear-gradient(135deg, #0AEFFF, #3B82F6)",
+              boxShadow: "0 0 20px rgba(10,239,255,0.15), 0 0 40px rgba(10,239,255,0.05)",
+              fontFamily: "var(--font-display)",
+              letterSpacing: "0.02em",
+              fontWeight: 600,
+            }
+          : {
+              fontFamily: "var(--font-body)",
+            }
+      }
       {...props}
     >
       {loading && <Loader2 className="h-4 w-4 animate-spin" />}
       {/* Scan light effect on primary buttons */}
       {variant === "primary" && (
         <span className="absolute inset-0 pointer-events-none overflow-hidden">
-          <span className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/10 to-transparent animate-scan-light" />
+          <span className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/15 to-transparent animate-scan-light" />
         </span>
       )}
       {children}

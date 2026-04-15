@@ -14,13 +14,12 @@ export default function Card({
   return (
     <div
       className={cn(
-        "rounded-[var(--radius-lg)] bg-surface",
-        "border border-border-subtle",
-        "shadow-[0_1px_3px_rgba(0,0,0,0.4),0_0_0_1px_var(--color-border-subtle)]",
+        "rounded-[var(--radius-lg)]",
+        "glass-panel",
         hoverable && [
-          "transition-all duration-200",
-          "hover:scale-[1.02] hover:border-border-focus/40",
-          "hover:shadow-[0_8px_32px_rgba(0,0,0,0.5),0_0_0_1px_var(--color-border-focus)]",
+          "transition-all duration-300",
+          "hover:scale-[1.02]",
+          "glass-panel-hover",
           "cursor-pointer",
         ],
         className,

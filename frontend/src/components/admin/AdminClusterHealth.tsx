@@ -67,24 +67,37 @@ export default function AdminClusterHealth(_props: ClusterHealthProps) {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.15, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-      className="glass-panel rounded-[var(--radius-lg)] p-6 relative overflow-hidden"
+      className="glass-panel rounded-[var(--radius-lg)] p-6 relative overflow-hidden group"
     >
-      {/* Glow accent */}
-      <div
-        className="absolute top-0 left-6 right-6 h-[1px] opacity-40"
-        style={{
-          background: "linear-gradient(90deg, transparent, rgba(10,239,255,0.5), transparent)",
-        }}
+      {/* ── Box Video Background ─────────────────────── */}
+      <video
+        autoPlay
+        loop
+        muted
+        playsInline
+        className="absolute inset-0 w-full h-full object-cover opacity-30 pointer-events-none z-0 mix-blend-screen transition-opacity duration-700 group-hover:opacity-50"
+        src="/admin-box-bg.mp4"
       />
+      <div className="absolute inset-0 bg-deepest/60 z-0 pointer-events-none" />
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <h2
-          className="text-xs font-bold uppercase tracking-[0.15em] text-primary"
-          style={{ fontFamily: "var(--font-display)" }}
-        >
-          Cluster Health
-        </h2>
+      {/* Main Content Layer */}
+      <div className="relative z-10">
+        {/* Glow accent */}
+        <div
+          className="absolute top-0 -left-6 -right-6 h-[1px] opacity-40"
+          style={{
+            background: "linear-gradient(90deg, transparent, rgba(10,239,255,0.8), transparent)",
+          }}
+        />
+
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <h2
+            className="text-base font-bold uppercase tracking-[0.15em] text-primary"
+            style={{ fontFamily: "var(--font-display)" }}
+          >
+            Cluster Health
+          </h2>
         <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--radius-sm)] border border-accent-green/20 bg-accent-green/5">
           <span className="relative flex h-2 w-2">
             <span className="absolute inset-0 rounded-full bg-accent-green animate-pulse-status" />
@@ -94,11 +107,11 @@ export default function AdminClusterHealth(_props: ClusterHealthProps) {
             All Systems Operational
           </span>
         </div>
-      </div>
+        </div>
 
-      {/* SVG Network Topology */}
-      <div className="relative">
-        <svg viewBox="0 0 500 310" className="w-full h-auto" style={{ maxHeight: 280 }}>
+        {/* SVG Network Topology */}
+        <div className="relative mt-4">
+          <svg viewBox="0 0 500 310" className="w-full h-auto" style={{ maxHeight: 380 }}>
           {/* Connection lines */}
           {CONNECTIONS.map(([from, to], i) => {
             const a = nodeMap[from as string];
@@ -154,7 +167,8 @@ export default function AdminClusterHealth(_props: ClusterHealthProps) {
                   y={node.y + node.r + 14}
                   textAnchor="middle"
                   fill="var(--color-secondary)"
-                  fontSize="9"
+                  fontSize="12"
+                  fontWeight="600"
                   fontFamily="var(--font-mono)"
                 >
                   {node.label}
@@ -179,25 +193,26 @@ export default function AdminClusterHealth(_props: ClusterHealthProps) {
             strokeDasharray="3 5"
           />
         </svg>
-      </div>
+        </div>
 
-      {/* Legend */}
-      <div className="flex items-center gap-5 mt-3 px-2">
-        {(
-          [
-            ["Compute", NODE_COLORS.compute.fill],
-            ["Storage", NODE_COLORS.storage.fill],
-            ["Network", NODE_COLORS.network.fill],
-          ] as const
-        ).map(([label, color]) => (
-          <div key={label} className="flex items-center gap-1.5">
-            <span
-              className="h-2 w-2 rounded-full"
-              style={{ background: color }}
-            />
-            <span className="text-[10px] text-muted font-mono">{label}</span>
-          </div>
-        ))}
+        {/* Legend */}
+        <div className="flex items-center gap-6 mt-6 px-2 pb-2">
+          {(
+            [
+              ["Compute", NODE_COLORS.compute.fill],
+              ["Storage", NODE_COLORS.storage.fill],
+              ["Network", NODE_COLORS.network.fill],
+            ] as const
+          ).map(([label, color]) => (
+            <div key={label} className="flex items-center gap-2">
+              <span
+                className="h-3 w-3 rounded-full"
+                style={{ background: color }}
+              />
+              <span className="text-xs text-muted font-mono">{label}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </motion.div>
   );

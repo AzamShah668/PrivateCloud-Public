@@ -6,7 +6,22 @@
 
 export default function BackgroundEffects() {
   return (
-    <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
+    <div className="fixed inset-0 overflow-hidden pointer-events-none z-0 bg-transparent">
+      {/* ── Video Background ──────────────────────────── */}
+      <div className="absolute inset-0">
+        <video
+          autoPlay
+          loop
+          muted
+          playsInline
+          className="w-full h-full object-cover opacity-40 mix-blend-screen"
+          src="/bg-animation.mp4"
+        />
+        {/* Dark gradient fade-out at the top to protect header text */}
+        <div className="absolute inset-0 bg-gradient-to-b from-deepest via-deepest/50 to-transparent opacity-80" />
+        {/* Subtle radial fade at edges to sink video into background */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,var(--color-deepest)_120%)] opacity-60" />
+      </div>
       {/* ── Gradient Orbs ─────────────────────────────── */}
       <div
         className="bg-orb"

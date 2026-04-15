@@ -1,109 +1,88 @@
-import { useRef, useMemo } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
-import * as THREE from "three";
-
-function TerrainMesh() {
-  const meshRef = useRef<THREE.Mesh>(null);
-  const timeRef = useRef(0);
-
-  // Create a plane geometry with enough vertices for a visible terrain grid
-  const geometry = useMemo(() => {
-    const geo = new THREE.PlaneGeometry(30, 30, 80, 80);
-    geo.rotateX(-Math.PI * 0.55); // Tilt to show terrain perspective
-    return geo;
-  }, []);
-
-  // Animate the terrain vertices to undulate like a living topographic map
-  useFrame((_, delta) => {
-    if (!meshRef.current) return;
-    timeRef.current += delta * 0.4;
-    const t = timeRef.current;
-    const pos = meshRef.current.geometry.attributes.position!;
-    const arr = pos.array as Float32Array;
-
-    for (let i = 0; i < pos.count; i++) {
-      const x = arr[i * 3]!;
-      const y = arr[i * 3 + 1]!;
-      // Layer multiple sine waves for organic-feeling terrain
-      arr[i * 3 + 2] =
-        Math.sin(x * 0.4 + t) * 0.6 +
-        Math.sin(y * 0.3 + t * 0.7) * 0.4 +
-        Math.sin((x + y) * 0.2 + t * 0.5) * 0.3;
-    }
-    pos.needsUpdate = true;
-  });
-
-  return (
-    <mesh ref={meshRef} geometry={geometry} position={[0, -2, 0]}>
-      <meshBasicMaterial
-        wireframe
-        color="#0AEFFF"
-        transparent
-        opacity={0.12}
-      />
-    </mesh>
-  );
-}
-
-function GlowOrb() {
-  const meshRef = useRef<THREE.Mesh>(null);
-
-  useFrame(({ clock }) => {
-    if (!meshRef.current) return;
-    const t = clock.getElapsedTime();
-    meshRef.current.position.y = Math.sin(t * 0.5) * 0.5 + 1;
-    meshRef.current.position.x = Math.sin(t * 0.3) * 2;
-  });
-
-  return (
-    <mesh ref={meshRef} position={[0, 1, -5]}>
-      <sphereGeometry args={[0.3, 16, 16]} />
-      <meshBasicMaterial color="#0AEFFF" transparent opacity={0.25} />
-    </mesh>
-  );
-}
-
-function SecondaryOrb() {
-  const meshRef = useRef<THREE.Mesh>(null);
-
-  useFrame(({ clock }) => {
-    if (!meshRef.current) return;
-    const t = clock.getElapsedTime();
-    meshRef.current.position.y = Math.cos(t * 0.4) * 0.8 + 0.5;
-    meshRef.current.position.x = Math.cos(t * 0.25) * 3;
-    meshRef.current.position.z = Math.sin(t * 0.15) * 2 - 4;
-  });
-
-  return (
-    <mesh ref={meshRef} position={[2, 0.5, -4]}>
-      <sphereGeometry args={[0.2, 12, 12]} />
-      <meshBasicMaterial color="#3B82F6" transparent opacity={0.2} />
-    </mesh>
-  );
-}
+import { useRef, useEffect, useState } from "react";
 
 export default function TerrainBackground() {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const handleCanPlay = () => setIsLoaded(true);
+    video.addEventListener("canplaythrough", handleCanPlay);
+
+    // Ensure playback starts even if autoplay is delayed
+    video.play().catch(() => {
+      // Autoplay blocked — still show the video frame
+    });
+
+    return () => video.removeEventListener("canplaythrough", handleCanPlay);
+  }, []);
+
   return (
     <div className="fixed inset-0 z-0">
-      {/* Gradient overlay for depth — fades terrain into darkness at edges */}
-      <div
-        className="absolute inset-0 z-10 pointer-events-none"
+      {/* Video element — covers the entire viewport */}
+      <video
+        ref={videoRef}
+        autoPlay
+        loop
+        muted
+        playsInline
+        preload="auto"
+        className="absolute inset-0 w-full h-full"
         style={{
-          background:
-            "radial-gradient(ellipse 70% 60% at 50% 55%, transparent 30%, #060B14 80%)",
+          objectFit: "cover",
+          opacity: isLoaded ? 1 : 0,
+          transition: "opacity 1.2s ease-out",
+        }}
+      >
+        <source src="/auth-bg.mp4" type="video/mp4" />
+      </video>
+
+      {/* Dark base — visible while video loads */}
+      <div
+        className="absolute inset-0"
+        style={{
+          background: "#060B14",
+          opacity: isLoaded ? 0 : 1,
+          transition: "opacity 1.2s ease-out",
+          pointerEvents: "none",
         }}
       />
-      <Canvas
-        camera={{ position: [0, 5, 12], fov: 45 }}
-        style={{ background: "#060B14" }}
-        gl={{ antialias: true, alpha: false }}
-      >
-        <TerrainMesh />
-        <GlowOrb />
-        <SecondaryOrb />
-        {/* Subtle ambient light — keeps the wireframe visible */}
-        <ambientLight intensity={0.5} />
-      </Canvas>
+
+      {/* Vignette — darkens edges so the glass card pops */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background:
+            "radial-gradient(ellipse 65% 55% at 50% 50%, transparent 20%, rgba(6,11,20,0.55) 60%, #060B14 95%)",
+        }}
+      />
+
+      {/* Top fade — keeps the top edge clean */}
+      <div
+        className="absolute inset-x-0 top-0 h-32 pointer-events-none"
+        style={{
+          background: "linear-gradient(to bottom, #060B14 0%, transparent 100%)",
+        }}
+      />
+
+      {/* Bottom fade — grounds the composition */}
+      <div
+        className="absolute inset-x-0 bottom-0 h-40 pointer-events-none"
+        style={{
+          background: "linear-gradient(to top, #060B14 0%, transparent 100%)",
+        }}
+      />
+
+      {/* Subtle blue tint overlay — ensures video hue matches the cyan/blue theme */}
+      <div
+        className="absolute inset-0 pointer-events-none mix-blend-soft-light"
+        style={{
+          background:
+            "radial-gradient(circle at 50% 50%, rgba(10,239,255,0.08) 0%, transparent 70%)",
+        }}
+      />
     </div>
   );
 }

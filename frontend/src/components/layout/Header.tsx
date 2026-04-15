@@ -18,12 +18,12 @@ export default function Header({ title, subtitle, actions }: HeaderProps) {
       />
       <div>
         <h1
-          className="text-lg font-bold text-primary"
+          className="text-2xl font-bold text-primary tracking-wide"
           style={{ fontFamily: "var(--font-display)" }}
         >
           {title}
         </h1>
-        {subtitle && <p className="text-xs text-muted mt-0.5">{subtitle}</p>}
+        {subtitle && <p className="text-sm text-muted mt-1">{subtitle}</p>}
       </div>
       {actions && <div className="flex items-center gap-3">{actions}</div>}
     </header>

@@ -60,23 +60,35 @@ export default function AdminRecentActivity({ logs, vms }: AdminRecentActivityPr
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.3, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-        className="col-span-12 xl:col-span-7 glass-panel rounded-[var(--radius-lg)] p-6 relative overflow-hidden"
+        className="col-span-12 xl:col-span-7 glass-panel rounded-[var(--radius-lg)] p-6 relative overflow-hidden group"
       >
-        <div
-          className="absolute top-0 left-6 right-6 h-[1px] opacity-40"
-          style={{
-            background: "linear-gradient(90deg, transparent, rgba(20,184,166,0.4), transparent)",
-          }}
+        {/* ── Box Video Background ─────────────────────── */}
+        <video
+          autoPlay
+          loop
+          muted
+          playsInline
+          className="absolute inset-0 w-full h-full object-cover opacity-30 pointer-events-none z-0 mix-blend-screen transition-opacity duration-700 group-hover:opacity-50"
+          src="/admin-box-bg.mp4"
         />
+        <div className="absolute inset-0 bg-deepest/60 z-0 pointer-events-none" />
 
-        <div className="flex items-center justify-between mb-4">
-          <h2
-            className="text-xs font-bold uppercase tracking-[0.15em] text-primary"
-            style={{ fontFamily: "var(--font-display)" }}
-          >
-            Recent Activity
-          </h2>
-          <span className="text-[10px] text-muted font-mono">
+        <div className="relative z-10">
+          <div
+            className="absolute top-0 -left-6 -right-6 h-[1px] opacity-40"
+            style={{
+              background: "linear-gradient(90deg, transparent, rgba(20,184,166,0.8), transparent)",
+            }}
+          />
+
+          <div className="flex items-center justify-between mb-6">
+            <h2
+              className="text-base font-bold uppercase tracking-[0.15em] text-primary"
+              style={{ fontFamily: "var(--font-display)" }}
+            >
+              Recent Activity
+            </h2>
+            <span className="text-xs text-muted font-mono">
             {logs.length} events
           </span>
         </div>
@@ -98,25 +110,26 @@ export default function AdminRecentActivity({ logs, vms }: AdminRecentActivityPr
                 {ACTION_ICONS[log.action] ?? <Activity className="h-3.5 w-3.5" />}
               </span>
               <div className="flex-1 min-w-0">
-                <span className="text-xs text-primary font-medium">
+                <span className="text-sm text-primary font-medium">
                   {log.action}
                 </span>
-                <span className="text-xs text-muted mx-1.5">on</span>
-                <span className="text-xs font-mono text-secondary">
+                <span className="text-sm text-muted mx-2">on</span>
+                <span className="text-sm font-mono text-secondary">
                   {log.target_type}:{log.target_id}
                 </span>
               </div>
-              <span className="text-[10px] text-muted font-mono whitespace-nowrap">
+              <span className="text-xs text-muted font-mono whitespace-nowrap">
                 {formatTimeAgo(log.created_at)}
               </span>
             </motion.div>
           ))}
 
-          {recentLogs.length === 0 && (
-            <div className="py-8 text-center text-sm text-muted">
-              No activity recorded yet
-            </div>
-          )}
+            {recentLogs.length === 0 && (
+              <div className="py-8 text-center text-sm text-muted">
+                No activity recorded yet
+              </div>
+            )}
+          </div>
         </div>
       </motion.div>
 
@@ -125,23 +138,35 @@ export default function AdminRecentActivity({ logs, vms }: AdminRecentActivityPr
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.35, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-        className="col-span-12 xl:col-span-5 glass-panel rounded-[var(--radius-lg)] p-6 relative overflow-hidden"
+        className="col-span-12 xl:col-span-5 glass-panel rounded-[var(--radius-lg)] p-6 relative overflow-hidden group"
       >
-        <div
-          className="absolute top-0 left-6 right-6 h-[1px] opacity-40"
-          style={{
-            background: "linear-gradient(90deg, transparent, rgba(245,158,11,0.4), transparent)",
-          }}
+        {/* ── Box Video Background ─────────────────────── */}
+        <video
+          autoPlay
+          loop
+          muted
+          playsInline
+          className="absolute inset-0 w-full h-full object-cover opacity-30 pointer-events-none z-0 mix-blend-screen transition-opacity duration-700 group-hover:opacity-50"
+          src="/admin-box-bg.mp4"
         />
+        <div className="absolute inset-0 bg-deepest/60 z-0 pointer-events-none" />
 
-        <div className="flex items-center justify-between mb-4">
-          <h2
-            className="text-xs font-bold uppercase tracking-[0.15em] text-primary"
-            style={{ fontFamily: "var(--font-display)" }}
-          >
-            Recent Deployments
-          </h2>
-          <span className="text-[10px] text-muted font-mono">
+        <div className="relative z-10">
+          <div
+            className="absolute top-0 -left-6 -right-6 h-[1px] opacity-40"
+            style={{
+              background: "linear-gradient(90deg, transparent, rgba(245,158,11,0.8), transparent)",
+            }}
+          />
+
+          <div className="flex items-center justify-between mb-6">
+            <h2
+              className="text-base font-bold uppercase tracking-[0.15em] text-primary"
+              style={{ fontFamily: "var(--font-display)" }}
+            >
+              Recent Deployments
+            </h2>
+            <span className="text-xs text-muted font-mono">
             {vms.length} total
           </span>
         </div>
@@ -161,16 +186,16 @@ export default function AdminRecentActivity({ logs, vms }: AdminRecentActivityPr
             >
               <Server className="h-3.5 w-3.5 text-accent-blue/60" />
               <div className="flex-1 min-w-0">
-                <p className="text-xs text-primary font-medium truncate">
+                <p className="text-sm text-primary font-medium truncate">
                   {vm.vm_name}
                 </p>
-                <p className="text-[10px] text-muted font-mono">
+                <p className="text-xs text-muted font-mono mt-0.5">
                   {vm.owner_username} &middot; {vm.os_choice}
                 </p>
               </div>
               <span
                 className={cn(
-                  "text-[10px] px-2 py-0.5 rounded-full border font-mono font-semibold uppercase",
+                  "text-xs px-2.5 py-0.5 rounded-full border font-mono font-semibold uppercase",
                   STATUS_STYLES[vm.status] ?? STATUS_STYLES.done
                 )}
               >
@@ -179,11 +204,12 @@ export default function AdminRecentActivity({ logs, vms }: AdminRecentActivityPr
             </motion.div>
           ))}
 
-          {recentVMs.length === 0 && (
-            <div className="py-8 text-center text-sm text-muted">
-              No deployments yet
-            </div>
-          )}
+            {recentVMs.length === 0 && (
+              <div className="py-8 text-center text-sm text-muted">
+                No deployments yet
+              </div>
+            )}
+          </div>
         </div>
       </motion.div>
     </div>

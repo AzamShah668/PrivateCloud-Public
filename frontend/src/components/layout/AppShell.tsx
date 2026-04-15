@@ -24,7 +24,7 @@ function TopBar() {
     >
       {/* Left: Welcome + Region */}
       <div className="flex items-center gap-4">
-        <span className="text-sm text-secondary" style={{ fontFamily: "var(--font-body)" }}>
+        <span className="text-base text-secondary" style={{ fontFamily: "var(--font-body)" }}>
           Welcome back,{" "}
           <span className="text-primary font-semibold">
             {user?.username ?? "User"}
@@ -32,7 +32,7 @@ function TopBar() {
         </span>
         <span className="text-border-subtle">|</span>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-muted uppercase tracking-wider" style={{ fontFamily: "var(--font-display)" }}>
+          <span className="text-xs text-muted uppercase tracking-wider" style={{ fontFamily: "var(--font-display)" }}>
             Active Region:
           </span>
           <span className="text-xs font-mono font-semibold text-accent-cyan px-2 py-0.5 rounded-[var(--radius-sm)] border border-accent-cyan/20 bg-accent-cyan/5">
@@ -54,7 +54,7 @@ function TopBar() {
       {/* Right: Status + Time */}
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2 px-3 py-1 rounded-[var(--radius-sm)] border border-border-subtle bg-elevated/30">
-          <span className="text-[10px] text-secondary uppercase tracking-wider" style={{ fontFamily: "var(--font-display)" }}>
+          <span className="text-xs text-secondary uppercase tracking-wider" style={{ fontFamily: "var(--font-display)" }}>
             Status:
           </span>
           <span className="text-xs font-mono font-semibold text-accent-green flex items-center gap-1.5">

@@ -79,7 +79,7 @@ export default function Sidebar() {
             className="text-xs font-bold tracking-[0.12em] text-accent-cyan uppercase"
             style={{ fontFamily: "var(--font-display)" }}
           >
-            AETHER_CLOUD
+            azna-cloud
           </span>
           <span className="text-[10px] text-muted tracking-wider" style={{ fontFamily: "var(--font-body)" }}>
             Private Cloud

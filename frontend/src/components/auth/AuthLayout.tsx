@@ -1,7 +1,7 @@
 import { type ReactNode } from "react";
 import { motion } from "motion/react";
 import TerrainBackground from "./TerrainBackground";
-import TypewriterText from "./TypewriterText";
+
 
 interface AuthLayoutProps {
   children: ReactNode;
@@ -10,8 +10,8 @@ interface AuthLayoutProps {
 function ACLogoMark() {
   return (
     <svg
-      width="36"
-      height="36"
+      width="40"
+      height="40"
       viewBox="0 0 40 40"
       fill="none"
     >
@@ -43,49 +43,97 @@ function ACLogoMark() {
 export default function AuthLayout({ children }: AuthLayoutProps) {
   return (
     <div className="relative min-h-dvh flex items-center justify-center overflow-hidden">
-      {/* Animated wireframe terrain */}
+      {/* Video particle background */}
       <TerrainBackground />
 
       {/* Glass card */}
       <motion.div
-        initial={{ opacity: 0, y: 40 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, delay: 0.5, ease: [0.16, 1, 0.3, 1] }}
+        initial={{ opacity: 0, y: 32, scale: 0.97 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.7, delay: 0.4, ease: [0.16, 1, 0.3, 1] }}
         className="relative z-20 w-full max-w-[420px] mx-4"
       >
         <div
           className="rounded-[var(--radius-xl)] p-8"
           style={{
-            background: "rgba(10, 22, 40, 0.85)",
-            backdropFilter: "blur(24px) saturate(1.3)",
-            boxShadow:
-              "0 0 0 1px rgba(10,239,255,0.08), 0 20px 60px rgba(0,0,0,0.6), 0 0 40px rgba(10,239,255,0.03), inset 0 1px 0 rgba(255,255,255,0.03)",
+            background: "rgba(6, 14, 30, 0.78)",
+            backdropFilter: "blur(28px) saturate(1.4)",
+            WebkitBackdropFilter: "blur(28px) saturate(1.4)",
+            boxShadow: [
+              "0 0 0 1px rgba(10,239,255,0.07)",
+              "0 24px 80px rgba(0,0,0,0.6)",
+              "0 0 60px rgba(10,239,255,0.04)",
+              "inset 0 1px 0 rgba(255,255,255,0.04)",
+            ].join(", "),
           }}
         >
+          {/* Subtle top-edge highlight — mimics light from the particles */}
+          <div
+            className="absolute inset-x-6 top-0 h-px pointer-events-none rounded-full"
+            style={{
+              background:
+                "linear-gradient(90deg, transparent 0%, rgba(10,239,255,0.25) 30%, rgba(59,130,246,0.2) 70%, transparent 100%)",
+            }}
+          />
+
           {/* Logo / Wordmark */}
           <div className="text-center mb-8">
             <motion.div
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.7, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-              className="inline-flex items-center justify-center mb-3"
+              transition={{ delay: 0.6, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+              className="inline-flex items-center justify-center mb-4"
             >
               <ACLogoMark />
             </motion.div>
 
-            <TypewriterText
-              text="AETHER_CLOUD"
-              delay={0.7}
-              className="block text-2xl font-bold tracking-[0.12em] text-accent-cyan"
-              style={{ fontFamily: "var(--font-display)" }}
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.7, duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <h1
+                className="text-[2rem] font-extrabold tracking-[0.06em] leading-none"
+                style={{
+                  fontFamily: "var(--font-display)",
+                  background: "linear-gradient(135deg, #0AEFFF 0%, #3B82F6 50%, #8B5CF6 100%)",
+                  WebkitBackgroundClip: "text",
+                  WebkitTextFillColor: "transparent",
+                  backgroundClip: "text",
+                  filter: "drop-shadow(0 0 20px rgba(10,239,255,0.3)) drop-shadow(0 0 6px rgba(59,130,246,0.2))",
+                }}
+              >
+                azna<span style={{
+                  background: "linear-gradient(135deg, #3B82F6 0%, #0AEFFF 100%)",
+                  WebkitBackgroundClip: "text",
+                  WebkitTextFillColor: "transparent",
+                  backgroundClip: "text",
+                }}>-cloud</span>
+              </h1>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, scaleX: 0 }}
+              animate={{ opacity: 1, scaleX: 1 }}
+              transition={{ delay: 1.1, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+              className="mx-auto mt-3 mb-2 h-px w-24"
+              style={{
+                background: "linear-gradient(90deg, transparent, #0AEFFF, #3B82F6, transparent)",
+                opacity: 0.4,
+              }}
             />
+
             <motion.p
               initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 1.6, duration: 0.4 }}
-              className="text-[10px] text-muted mt-2 tracking-[0.2em] uppercase"
+              animate={{ opacity: 0.5 }}
+              transition={{ delay: 1.3, duration: 0.5 }}
+              className="text-[9px] mt-2 tracking-[0.3em] uppercase"
+              style={{
+                fontFamily: "var(--font-mono)",
+                color: "#7A8BA8",
+              }}
             >
-              Cloud Infrastructure Control
+              Private Cloud Infrastructure
             </motion.p>
           </div>
 

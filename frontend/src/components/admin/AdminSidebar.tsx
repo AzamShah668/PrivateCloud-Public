@@ -98,7 +98,7 @@ export default function AdminSidebar() {
             className="text-xs font-bold tracking-[0.12em] text-accent-amber uppercase"
             style={{ fontFamily: "var(--font-display)" }}
           >
-            AETHER_CLOUD
+            azna-cloud
           </span>
           <span
             className="text-[10px] text-muted tracking-wider"

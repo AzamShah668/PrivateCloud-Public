@@ -150,6 +150,22 @@ def init_db() -> None:
             )
 
             # ----------------------------------------------------------
+            # vm_jobs credential columns (added after initial schema)
+            # ALTER TABLE … ADD COLUMN IF NOT EXISTS is idempotent —
+            # safe to run on an already-initialised database.
+            # ----------------------------------------------------------
+            for column_def in (
+                "vm_ip       TEXT",
+                "vm_username TEXT",
+                "vm_password TEXT",
+            ):
+                col_name = column_def.split()[0]
+                cur.execute(
+                    f"ALTER TABLE vm_jobs ADD COLUMN IF NOT EXISTS {column_def}"
+                )
+                logger.debug("Ensured column vm_jobs.%s exists.", col_name)
+
+            # ----------------------------------------------------------
             # audit_logs
             # Immutable record of every significant action in the system.
             # ----------------------------------------------------------
@@ -340,12 +356,21 @@ def update_vm_job(
     status: str,
     proxmox_response: dict | None = None,
     error_message: str | None = None,
+    vm_ip: str | None = None,
+    vm_username: str | None = None,
+    vm_password: str | None = None,
 ) -> None:
     """
-    Update the status (and optional response/error) of an existing VM job.
+    Update the status (and optional response/error/credentials) of an existing VM job.
 
     Typical status flow:  queued → running → done
                                            → failed
+
+    vm_ip / vm_username / vm_password are populated once the VM boots and the
+    guest agent reports its IP address.  The SQL uses COALESCE so that passing
+    None for a credential field leaves the existing DB value untouched —
+    callers that don't have credential info won't accidentally overwrite
+    previously stored values.
     """
     with _conn() as conn:
         with conn.cursor() as cur:
@@ -355,6 +380,9 @@ def update_vm_job(
                 SET status           = %s,
                     proxmox_response = %s,
                     error_message    = %s,
+                    vm_ip            = COALESCE(%s, vm_ip),
+                    vm_username      = COALESCE(%s, vm_username),
+                    vm_password      = COALESCE(%s, vm_password),
                     updated_at       = %s
                 WHERE id = %s
                 """,
@@ -362,6 +390,9 @@ def update_vm_job(
                     status,
                     json.dumps(proxmox_response) if proxmox_response is not None else None,
                     error_message,
+                    vm_ip,
+                    vm_username,
+                    vm_password,
                     utc_now_iso(),
                     job_id,
                 ),

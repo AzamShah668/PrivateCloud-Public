@@ -138,11 +138,27 @@ def create_vm(
     current_user: UserInDB = Depends(get_current_user),
 ):
     """
-    Submit a VM creation request.
+    Provision a new VM by cloning the golden image template.
 
-    The VM is created synchronously inside this request. If Proxmox succeeds
-    the job status will be 'done'; if Proxmox fails it will be 'failed' and
-    the response status code will be 502.
+    The full flow is:
+      1.  Enforce the user's daily quota.
+      2.  Ask Proxmox for the next free VMID.
+      3.  Insert a vm_job row (status = queued).
+      4.  Clone the golden image template to the new VMID.
+      5.  Wait for the clone task to finish (synchronous poll).
+      6.  Apply the requested CPU / RAM settings on the new VM.
+      7.  Start the VM.
+      8.  Poll the QEMU guest agent until an IP address appears (up to 120 s).
+      9.  Save the IP + golden-image credentials in the DB and set status = done.
+      10. Write an audit log entry.
+      11. Return the full job record including vm_ip, vm_username, vm_password.
+
+    If Proxmox fails at any step the job is marked 'failed', the error is
+    stored, and a 502 response is returned (so the client still gets the job id
+    and the error message).
+
+    If IP polling times out the VM is still marked 'done' but vm_ip will be
+    None — the user can SSH in later once the VM fully boots.
     """
 
     # ── Step 1: quota check ───────────────────────────────────────────────
@@ -153,13 +169,13 @@ def create_vm(
         proxmox._ensure_authenticated()
         vmid = proxmox.get_next_vmid()
     except Exception as exc:
-        logger.error(f"Failed to get next VMID from Proxmox: {exc}")
+        logger.error("Failed to get next VMID from Proxmox: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Cannot reach Proxmox server. Please try again later.",
         )
 
-    # ── Step 3: build the full request payload (stored for audit/replay) ──
+    # ── Step 3: build the request payload (stored for audit / replay) ─────
     request_payload = {
         "vm_name":    vm_request.vm_name,
         "os_choice":  vm_request.os_choice,
@@ -169,7 +185,7 @@ def create_vm(
         "node":       vm_request.node,
     }
 
-    # ── Step 4: insert the job row with status = queued ───────────────────
+    # ── Step 4: insert the job row (status = queued) ──────────────────────
     job_id = database.create_vm_job(
         user_id=current_user.id,
         vmid=vmid,
@@ -179,44 +195,84 @@ def create_vm(
     )
 
     logger.info(
-        f"VM job {job_id} created for user '{current_user.username}' "
-        f"(vmid={vmid}, os={vm_request.os_choice})"
+        "VM job %d created for user '%s' (vmid=%d, os=%s)",
+        job_id, current_user.username, vmid, vm_request.os_choice,
     )
 
-    # ── Step 5: call Proxmox to actually create the VM ────────────────────
-    os_val = vm_request.os_choice.value
-    proxmox_config = {
-        "node":      vm_request.node,
-        "vmid":      vmid,
-        "name":      vm_request.vm_name,
-        "ostype":    _map_os_to_proxmox_type(os_val),
-        "cores":     vm_request.cpu_cores,
-        "memory":    vm_request.ram_mb,
-        "storage":   "local-lvm",
-        "disk_size": str(vm_request.storage_gb),
-        "iso":       _map_os_to_iso(os_val),
-    }
-
     proxmox_failed = False
+    node = vm_request.node
 
     try:
-        # Mark the job as running before the Proxmox call
+        # ── Step 5: clone the golden image ───────────────────────────────
         database.update_vm_job(job_id=job_id, status=VMStatus.running.value)
 
-        returned_vmid = proxmox.create_vm(proxmox_config)
+        clone_upid = proxmox.clone_vm(
+            template_vmid=proxmox.golden_image_vmid,
+            new_vmid=vmid,
+            name=vm_request.vm_name,
+            node=node,
+        )
 
-        # ── Step 6a: success — update job to "done" ───────────────────────
+        logger.info(
+            "Waiting for clone task to finish (job=%d, vmid=%d, upid=%s)…",
+            job_id, vmid, clone_upid,
+        )
+        proxmox.wait_for_task(node=node, upid=clone_upid, timeout=180)
+        logger.info("Clone complete for vmid=%d.", vmid)
+
+        # ── Step 6: apply the requested CPU / RAM ─────────────────────────
+        proxmox.update_vm_config(
+            vmid=vmid,
+            node=node,
+            cores=vm_request.cpu_cores,
+            memory=vm_request.ram_mb,
+        )
+        logger.info(
+            "VM %d configured: %d cores, %d MB RAM.",
+            vmid, vm_request.cpu_cores, vm_request.ram_mb,
+        )
+
+        # ── Step 7: start the VM ──────────────────────────────────────────
+        start_upid = proxmox.start_vm(vmid=vmid, node=node)
+        logger.info(
+            "Waiting for VM %d to start (upid=%s)…", vmid, start_upid
+        )
+        proxmox.wait_for_task(node=node, upid=start_upid, timeout=60)
+        logger.info("VM %d is running.", vmid)
+
+        # ── Step 8: poll the QEMU guest agent for the IP address ──────────
+        # The guest agent needs a few seconds after boot to become reachable,
+        # so we poll with a generous timeout before giving up.
+        vm_ip = proxmox.get_vm_ip_from_agent(
+            vmid=vmid,
+            node=node,
+            timeout=120,
+            poll_interval=5,
+        )
+
+        if vm_ip:
+            logger.info("VM %d (job %d) got IP: %s", vmid, job_id, vm_ip)
+        else:
+            logger.warning(
+                "IP polling timed out for vmid=%d (job=%d). "
+                "VM is running but IP is not yet known.",
+                vmid, job_id,
+            )
+
+        # ── Step 9: mark the job done and store credentials ───────────────
         database.update_vm_job(
             job_id=job_id,
             status=VMStatus.done.value,
-            proxmox_response={"vmid": returned_vmid, "result": "OK"},
+            proxmox_response={"vmid": vmid, "result": "OK"},
+            vm_ip=vm_ip,
+            vm_username=proxmox.vm_default_username,
+            vm_password=proxmox.vm_default_password,
         )
-        logger.info(f"VM job {job_id} completed. Proxmox vmid={returned_vmid}")
+        logger.info("VM job %d completed (vmid=%d, ip=%s).", job_id, vmid, vm_ip)
 
     except ProxmoxAPIError as exc:
-        # ── Step 6b: Proxmox-specific failure ─────────────────────────────
         proxmox_failed = True
-        logger.error(f"Proxmox API error for job {job_id}: {exc}")
+        logger.error("Proxmox API error for job %d: %s", job_id, exc)
         database.update_vm_job(
             job_id=job_id,
             status=VMStatus.failed.value,
@@ -224,9 +280,8 @@ def create_vm(
         )
 
     except Exception as exc:
-        # ── Step 6c: unexpected failure ────────────────────────────────────
         proxmox_failed = True
-        logger.error(f"Unexpected error for job {job_id}: {exc}")
+        logger.error("Unexpected error for job %d: %s", job_id, exc)
         database.update_vm_job(
             job_id=job_id,
             status=VMStatus.failed.value,
@@ -239,7 +294,7 @@ def create_vm(
     # Fetch the freshest job state to return to the client
     updated_job = database.get_vm_job(job_id)
 
-    # ── Step 7: write audit log ───────────────────────────────────────────
+    # ── Step 10: audit log ────────────────────────────────────────────────
     log_event(
         user_id=current_user.id,
         action="vm.create",
@@ -250,10 +305,11 @@ def create_vm(
             "vm_name":   vm_request.vm_name,
             "os_choice": vm_request.os_choice.value,
             "status":    updated_job["status"],
+            "ip":        updated_job.get("vm_ip"),
         },
     )
 
-    # ── Step 8: return the job ────────────────────────────────────────────
+    # ── Step 11: return the job (includes credentials if available) ───────
     return VMJobResponse.model_validate(updated_job)
 
 

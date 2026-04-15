@@ -24,6 +24,7 @@
 # =============================================================================
 
 import os
+import time
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
@@ -104,6 +105,16 @@ class ProxmoxClient:
         self._ticket:        Optional[str]      = None
         self._csrf_token:    Optional[str]      = None
         self._ticket_expiry: Optional[datetime] = None
+
+        # ── Golden image config ──────────────────────────────────────────
+        # VMID of the golden image template to clone new VMs from.
+        # Set GOLDEN_IMAGE_VMID in your .env (default: 9000).
+        self.golden_image_vmid: int = int(os.getenv("GOLDEN_IMAGE_VMID", "9000"))
+
+        # Default SSH credentials baked into the golden image.
+        # These are returned to the user after VM creation so they can log in.
+        self.vm_default_username: str = os.getenv("VM_DEFAULT_USERNAME", "ubuntu")
+        self.vm_default_password: str = os.getenv("VM_DEFAULT_PASSWORD", "")
 
         # Suppress urllib3's "InsecureRequestWarning" when verify_ssl=False
         if not self.verify_ssl:
@@ -498,3 +509,174 @@ class ProxmoxClient:
         """
         path = f"nodes/{node}/tasks/{upid}/status"
         return self._get(path)
+
+    # =========================================================================
+    # ── Golden-image clone + IP retrieval ─────────────────────────────────────
+    # =========================================================================
+
+    def clone_vm(
+        self,
+        template_vmid: int,
+        new_vmid: int,
+        name: str,
+        node: Optional[str] = None,
+        storage: Optional[str] = None,
+    ) -> str:
+        """
+        Clone a VM template to a new, fully independent VM (full clone).
+
+        Args:
+            template_vmid : VMID of the source template (e.g. 9000).
+            new_vmid      : VMID to assign to the new VM.
+            name          : Display name for the new VM.
+            node          : Proxmox node name (defaults to self.default_node).
+            storage       : Target storage pool (e.g. "local-lvm"). If None,
+                            Proxmox uses the same storage as the template.
+
+        Returns:
+            str: The UPID (task ID) of the async clone operation.
+                 Pass this to wait_for_task() to block until the clone finishes.
+
+        Raises:
+            ProxmoxAPIError: if Proxmox rejects the clone request.
+        """
+        node = node or self.default_node
+        path = f"nodes/{node}/qemu/{template_vmid}/clone"
+
+        params: Dict[str, Any] = {
+            "newid":  new_vmid,
+            "name":   name,
+            "full":   1,       # full clone — independent disk, not linked
+            "target": node,
+        }
+        if storage:
+            params["storage"] = storage
+
+        upid = self._post(path, params)
+        logger.info(
+            "Clone task started: template vmid=%d → new vmid=%d  (upid=%s)",
+            template_vmid, new_vmid, upid,
+        )
+        return upid
+
+    def wait_for_task(
+        self,
+        node: str,
+        upid: str,
+        timeout: int = 180,
+        poll_interval: int = 3,
+    ) -> None:
+        """
+        Block until a Proxmox async task reaches status='stopped'.
+
+        Proxmox tasks (clone, start, stop, delete) are asynchronous — the API
+        returns a UPID immediately and the work happens in the background.
+        This helper polls get_task_status() until the task either succeeds
+        or fails, so callers don't need to manage their own polling loops.
+
+        Args:
+            node          : Proxmox node where the task is running.
+            upid          : Task ID returned by clone_vm / start_vm / etc.
+            timeout       : Max seconds to wait before giving up (default 180).
+            poll_interval : Seconds between each status check (default 3).
+
+        Raises:
+            ProxmoxAPIError: if the task fails or the timeout is reached.
+        """
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                task = self.get_task_status(node, upid)
+            except ProxmoxAPIError as exc:
+                logger.warning("Could not poll task %s: %s", upid, exc)
+                time.sleep(poll_interval)
+                continue
+
+            if task.get("status") == "stopped":
+                exit_status = task.get("exitstatus", "")
+                if exit_status == "OK":
+                    logger.info("Task %s completed OK.", upid)
+                    return
+                raise ProxmoxAPIError(
+                    f"Task {upid} failed with exitstatus='{exit_status}'"
+                )
+
+            time.sleep(poll_interval)
+
+        raise ProxmoxAPIError(
+            f"Task {upid} timed out after {timeout}s — still not 'stopped'."
+        )
+
+    def get_vm_ip_from_agent(
+        self,
+        vmid: int,
+        node: Optional[str] = None,
+        timeout: int = 120,
+        poll_interval: int = 5,
+    ) -> Optional[str]:
+        """
+        Poll the QEMU guest agent until a non-loopback IPv4 address appears.
+
+        After a VM boots, it takes a few seconds for the OS to fully start and
+        for the guest agent to respond.  This method retries automatically until
+        `timeout` seconds have elapsed, then returns None if no IP was found.
+
+        Prerequisites (must be true for this to work):
+          - `qemu-guest-agent` package installed and running inside the VM.
+          - `agent: 1` set in the VM's Proxmox hardware config (the golden
+            image template should have this pre-configured).
+
+        Args:
+            vmid          : VMID of the running VM.
+            node          : Proxmox node name (defaults to self.default_node).
+            timeout       : Max seconds to poll before giving up (default 120).
+            poll_interval : Seconds between each attempt (default 5).
+
+        Returns:
+            str | None: The first non-loopback IPv4 address found, or None.
+        """
+        node = node or self.default_node
+        path = f"nodes/{node}/qemu/{vmid}/agent/network-get-interfaces"
+        deadline = time.time() + timeout
+
+        logger.info(
+            "Polling QEMU guest agent for IP of vmid=%d (timeout=%ds)…",
+            vmid, timeout,
+        )
+
+        while time.time() < deadline:
+            try:
+                data = self._get(path)
+
+                # The agent endpoint returns { "result": [ { "name": "eth0",
+                #   "ip-addresses": [ {"ip-address-type": "ipv4",
+                #                      "ip-address": "192.168.0.x", ...} ] } ] }
+                if data and "result" in data:
+                    for iface in data["result"]:
+                        # Skip loopback and docker bridge
+                        if iface.get("name") in ("lo", "docker0"):
+                            continue
+                        for addr_info in iface.get("ip-addresses", []):
+                            if addr_info.get("ip-address-type") != "ipv4":
+                                continue
+                            ip = addr_info.get("ip-address", "")
+                            # Skip loopback even if interface name was different
+                            if ip and not ip.startswith("127."):
+                                logger.info(
+                                    "Got IP %s for vmid=%d via guest agent.", ip, vmid
+                                )
+                                return ip
+
+            except Exception as exc:
+                # Agent not ready yet — this is expected right after boot
+                logger.debug(
+                    "Guest agent not ready for vmid=%d (%s), retrying in %ds…",
+                    vmid, exc, poll_interval,
+                )
+
+            time.sleep(poll_interval)
+
+        logger.warning(
+            "IP polling timed out for vmid=%d after %ds.", vmid, timeout
+        )
+        return None

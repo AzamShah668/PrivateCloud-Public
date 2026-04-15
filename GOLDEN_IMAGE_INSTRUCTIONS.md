@@ -59,7 +59,7 @@ The app reads these values and returns them to the user after VM creation so the
 Run this from your local machine:
 
 ```bash
-scp create_golden_image.sh root@192.168.0.200:/root/
+scp create_golden_image.sh root@192.168.0.xxx:/root/
 ```
 
 ---
@@ -67,7 +67,7 @@ scp create_golden_image.sh root@192.168.0.200:/root/
 ## Step 4 — SSH Into Your Proxmox Node
 
 ```bash
-ssh root@192.168.0.200
+ssh root@192.168.0.xxx
 ```
 
 ---
@@ -91,7 +91,7 @@ The script will go through 7 steps automatically. The only slow part is Step 4 (
 
 ## Step 6 — Verify in Proxmox Web UI
 
-Open `https://192.168.0.200:8006` and check:
+Open `https://192.168.0.xxx:8006` and check:
 
 - VMID 9000 appears in the left sidebar with a **template icon** (stack of papers)
 - Click it → Hardware tab → confirm `QEMU Guest Agent` shows `enabled=1`

@@ -7,7 +7,7 @@ This guide walks you through creating the Ubuntu 24.04 golden image template (VM
 ## Before You Start
 
 Make sure you have:
-- SSH access to your Proxmox node (`192.168.0.200`)
+- SSH access to your Proxmox node (`192.168.0.xxx`)
 - The `create_golden_image.sh` script copied to the node
 - VMID 9000 free (if it exists, destroy it first)
 

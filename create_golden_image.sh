@@ -6,12 +6,11 @@
 # Creates a fresh Ubuntu 24.04 golden image template (VMID 9000) using the
 # official Ubuntu cloud image — no ISO install needed, fully automated.
 #
-# cloud-init is DISABLED. Everything is baked in via virt-customize:
-#   - qemu-guest-agent installed and enabled
-#   - DHCP networking via netplan + systemd-networkd
-#   - User with password and sudo access
-#   - SSH with password auth enabled
-#   - Boots in ~10 seconds, no first-boot overhead
+# The cloud image approach is the correct way to build Proxmox templates:
+#   - Pre-installed OS, boots in ~10 seconds
+#   - qemu-guest-agent pre-installed and enabled
+#   - cloud-init support for hostname / SSH key injection on clone
+#   - No interactive installer to click through
 #
 # Usage:
 #   chmod +x create_golden_image.sh
@@ -32,7 +31,7 @@ DISK_SIZE="20G"              # golden image disk size
 RAM_MB=2048
 CPU_CORES=2
 
-# Default credentials baked into the golden image via virt-customize.
+# Default credentials baked into the golden image via cloud-init.
 # These must match VM_DEFAULT_USERNAME and VM_DEFAULT_PASSWORD in your .env
 DEFAULT_USER="ubuntu"
 DEFAULT_PASSWORD="verventech123"   # ← must match VM_DEFAULT_PASSWORD in .env
@@ -59,7 +58,6 @@ echo ""
 echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"
 echo -e "${BOLD}║   Proxmox Golden Image Creator               ║${NC}"
 echo -e "${BOLD}║   Ubuntu 24.04 LTS — VMID $VMID              ║${NC}"
-echo -e "${BOLD}║   cloud-init DISABLED — zero first-boot lag  ║${NC}"
 echo -e "${BOLD}╚══════════════════════════════════════════════╝${NC}"
 echo ""
 info "Node     : $NODE"
@@ -110,8 +108,8 @@ fi
 IMGTYPE=$(qemu-img info "$CLOUD_IMAGE_FILE" 2>/dev/null | grep "file format" | awk '{print $3}')
 info "Image format: $IMGTYPE"
 
-# ── Customize image: guest agent + user + DHCP + disable cloud-init ──────────
-step "Step 4/7 — Customising image (guest agent, user, networking, disable cloud-init)"
+# ── Inject qemu-guest-agent + set password via virt-customize ─────────────────
+step "Step 4/7 — Customising image (installing guest agent + setting password)"
 info "This modifies a copy of the image — takes ~60 seconds..."
 
 CUSTOM_IMAGE="/tmp/ubuntu-24.04-golden-custom.img"
@@ -130,41 +128,12 @@ if command -v virt-customize &>/dev/null; then
         --run-command "sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config" \
         --run-command "sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config.d/60-cloudimg-settings.conf || true" \
         --run-command "echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config.d/60-cloudimg-settings.conf" \
-        --run-command "mkdir -p /etc/netplan" \
-        --run-command "cat > /etc/netplan/01-dhcp.yaml << 'NETPLAN'
-network:
-  version: 2
-  renderer: networkd
-  ethernets:
-    all-en:
-      match:
-        name: \"en*\"
-      dhcp4: true
-      dhcp6: true
-      optional: true
-    all-eth:
-      match:
-        name: \"eth*\"
-      dhcp4: true
-      dhcp6: true
-      optional: true
-NETPLAN" \
-        --run-command "chmod 600 /etc/netplan/01-dhcp.yaml" \
-        --run-command "rm -f /etc/netplan/50-cloud-init.yaml" \
-        --run-command "systemctl enable systemd-networkd" \
-        --run-command "systemctl enable systemd-resolved" \
-        --run-command "touch /etc/cloud/cloud-init.disabled" \
-        --run-command "systemctl disable cloud-init cloud-init-local cloud-config cloud-final 2>/dev/null || true" \
-        --run-command "cloud-init clean --logs 2>/dev/null || true" \
+        --run-command "cloud-init clean" \
         --selinux-relabel 2>/dev/null || true
     success "Image customised successfully."
-    success "  - qemu-guest-agent: enabled"
-    success "  - cloud-init: DISABLED"
-    success "  - networking: netplan + systemd-networkd (DHCP)"
-    success "  - user: $DEFAULT_USER with sudo"
-    success "  - SSH: password auth enabled"
 else
-    die "virt-customize not available — cannot build golden image without it."
+    warn "virt-customize not available — skipping offline customisation."
+    warn "Guest agent will be installed via cloud-init at first boot instead."
 fi
 
 # ── Create the VM ─────────────────────────────────────────────────────────────
@@ -193,15 +162,26 @@ info "Importing $CUSTOM_IMAGE → $STORAGE..."
 qm importdisk $VMID "$CUSTOM_IMAGE" $STORAGE --format raw
 success "Disk imported."
 
-# Attach the imported disk as scsi0 (NO cloud-init drive)
-info "Attaching disk..."
+# Attach the imported disk as scsi0
+info "Attaching disk and adding cloud-init drive..."
 qm set $VMID --scsi0 ${STORAGE}:vm-${VMID}-disk-0,discard=on
+qm set $VMID --ide2 ${STORAGE}:cloudinit
 qm set $VMID --boot c --bootdisk scsi0
 
 # Resize disk to requested size
 info "Resizing disk to $DISK_SIZE..."
 qm resize $VMID scsi0 $DISK_SIZE
 success "Disk resized to $DISK_SIZE."
+
+# ── Configure cloud-init defaults ─────────────────────────────────────────────
+info "Configuring cloud-init defaults..."
+qm set $VMID \
+    --ciuser  "$DEFAULT_USER" \
+    --cipassword "$DEFAULT_PASSWORD" \
+    --ipconfig0 ip=dhcp \
+    --nameserver "8.8.8.8 1.1.1.1"
+
+success "Cloud-init configured."
 
 # ── Verify agent config is set ───────────────────────────────────────────────
 AGENT_CHECK=$(qm config $VMID | grep "^agent:" || echo "")
@@ -225,16 +205,23 @@ success "Cleanup done."
 echo ""
 echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"
 echo -e "${BOLD}║   Golden Image Created Successfully!         ║${NC}"
-echo -e "${BOLD}║   cloud-init DISABLED — instant boot         ║${NC}"
 echo -e "${BOLD}╚══════════════════════════════════════════════╝${NC}"
 echo ""
 info "Final VM config:"
 qm config $VMID
 echo ""
+echo -e "${GREEN}${BOLD}Next step — update your .env file:${NC}"
+echo ""
+echo "   GOLDEN_IMAGE_VMID=$VMID"
+echo "   VM_DEFAULT_USERNAME=$DEFAULT_USER"
+echo "   VM_DEFAULT_PASSWORD=$DEFAULT_PASSWORD"
+echo ""
+echo -e "${YELLOW}Make sure VM_DEFAULT_PASSWORD in .env matches what you set${NC}"
+echo -e "${YELLOW}at the top of this script (DEFAULT_PASSWORD variable).${NC}"
+echo ""
 success "Done. New VMs cloned from VMID $VMID will have:"
 success "  - qemu-guest-agent running at boot"
-success "  - DHCP IPv4 via netplan + systemd-networkd"
 success "  - SSH on port 22 with password auth enabled"
 success "  - User '$DEFAULT_USER' with sudo access"
-success "  - NO cloud-init — boots in ~10 seconds"
+success "  - DHCP IP returned via guest agent to your API"
 echo ""

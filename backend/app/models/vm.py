@@ -80,16 +80,13 @@ class VMCreateRequest(BaseModel):
         "node": "pve"
     }
     """
-    vm_name:      str
-    os_choice:    OS_Choice   # must be one of the allowed OS values
-    cpu_cores:    int
-    ram_mb:       int
-    storage_gb:   int
+    vm_name:    str
+    os_choice:  OS_Choice   # must be one of the allowed OS values
+    cpu_cores:  int
+    ram_mb:     int
+    storage_gb: int
     # Proxmox node to create the VM on. Defaults to "pve" (the default node name).
-    node:         str = "pve"
-    # When True and a cloud-init template exists for the chosen OS,
-    # clone the template instead of creating from ISO.
-    use_template: bool = False
+    node: str = "pve"
 
     @field_validator("vm_name")
     @classmethod
@@ -177,6 +174,10 @@ class VMJobResponse(BaseModel):
     """
     What the API returns for a vm_job row.
     Maps 1-to-1 with the vm_jobs DB table (minus internal implementation details).
+
+    vm_ip / vm_username / vm_password are populated once the VM boots and the
+    QEMU guest agent reports its IP address.  They will be None if the VM is
+    still being provisioned or if IP polling timed out.
     """
     id:               int
     user_id:          int
@@ -187,6 +188,10 @@ class VMJobResponse(BaseModel):
     request_payload:  Dict[str, Any]
     proxmox_response: Optional[Dict[str, Any]] = None
     error_message:    Optional[str]            = None
+    # ── VM access credentials — populated after successful boot ──────────
+    vm_ip:            Optional[str]            = None
+    vm_username:      Optional[str]            = None
+    vm_password:      Optional[str]            = None
     created_at:       datetime
     updated_at:       datetime
 

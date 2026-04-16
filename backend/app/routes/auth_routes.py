@@ -36,7 +36,7 @@ from app.auth import (
     TokenResponse,
 )
 from db import database
-from app.models.user import UserCreate, UserResponse, UserInDB
+from app.models.user import UserCreate, UserResponse, UserInDB, UserUpdateRequest
 
 logger = logging.getLogger(__name__)
 
@@ -237,3 +237,131 @@ def get_me(current_user: UserInDB = Depends(get_current_user)):
         401 Unauthorized — missing or invalid token.
     """
     return UserResponse.model_validate(current_user.model_dump())
+
+
+# =============================================================================
+# PATCH /auth/me
+# =============================================================================
+
+@router.patch(
+    "/me",
+    response_model=UserResponse,
+    summary="Update the current user's credentials",
+)
+def update_me(
+    update_data: UserUpdateRequest,
+    current_user: UserInDB = Depends(get_current_user),
+):
+    """
+    Update the authenticated user's credentials.
+
+    You can change any combination of:
+      - **username** — must be unique and at least 3 characters, no spaces.
+      - **password** — supply `current_password` (proof of identity) and
+        `new_password` (min 8 chars).
+      - **daily_quota** — regular users can only *lower* their own quota;
+        admins can set it to any positive value.
+
+    At least one changeable field must be provided, otherwise a 400 is returned.
+
+    Returns the updated user profile (without the password hash).
+
+    Errors:
+        400 Bad Request  — nothing to update, or `current_password` missing
+                           when changing password.
+        401 Unauthorized — `current_password` is wrong.
+        409 Conflict     — chosen username is already taken.
+    """
+    # ── Guard: at least one field must be changing ────────────────────────
+    if (
+        update_data.username     is None
+        and update_data.new_password is None
+        and update_data.daily_quota  is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Nothing to update. Supply at least one of: "
+                "username, new_password, daily_quota."
+            ),
+        )
+
+    # ── Password change validation ────────────────────────────────────────
+    new_password_hash: str | None = None
+
+    if update_data.new_password is not None:
+        # Require current_password as proof of identity before allowing a
+        # password change — prevents someone with a stolen session token from
+        # locking out the real owner.
+        if not update_data.current_password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="current_password is required when setting a new password.",
+            )
+
+        if not verify_password(update_data.current_password, current_user.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="current_password is incorrect.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        new_password_hash = hash_password(update_data.new_password)
+
+    # ── Username uniqueness check ─────────────────────────────────────────
+    if update_data.username is not None and update_data.username != current_user.username:
+        if database.get_user_by_username(update_data.username):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Username '{update_data.username}' is already taken.",
+            )
+
+    # ── daily_quota guard for non-admins ──────────────────────────────────
+    final_quota: int | None = update_data.daily_quota
+    if final_quota is not None and current_user.role != "admin":
+        # Regular users cannot raise their own quota
+        if final_quota > current_user.daily_quota:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "You cannot increase your own daily_quota. "
+                    "Contact an admin to raise your limit."
+                ),
+            )
+
+    # ── Apply the update ──────────────────────────────────────────────────
+    try:
+        database.update_user_credentials(
+            current_user.id,
+            username=update_data.username,
+            password_hash=new_password_hash,
+            daily_quota=final_quota,
+        )
+    except psycopg2.errors.UniqueViolation:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Username '{update_data.username}' is already taken.",
+        )
+
+    # ── Audit log ─────────────────────────────────────────────────────────
+    changed_fields = []
+    if update_data.username     is not None: changed_fields.append("username")
+    if update_data.new_password is not None: changed_fields.append("password")
+    if update_data.daily_quota  is not None: changed_fields.append("daily_quota")
+
+    log_event(
+        user_id=current_user.id,
+        action="user.update_credentials",
+        target_type="user",
+        target_id=str(current_user.id),
+        details={"changed_fields": changed_fields},
+    )
+
+    logger.info(
+        f"User '{current_user.username}' (id={current_user.id}) "
+        f"updated: {changed_fields}"
+    )
+
+    # ── Return the fresh user record ──────────────────────────────────────
+    updated_user = database.get_user_by_id(current_user.id)
+    return UserResponse.model_validate(updated_user)

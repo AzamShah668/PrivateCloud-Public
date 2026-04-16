@@ -104,3 +104,52 @@ class UserInDB(UserResponse):
     password_hash in a normal API response.
     """
     password_hash: str
+
+
+class UserUpdateRequest(BaseModel):
+    """
+    Schema for PATCH /auth/me — update the current user's credentials.
+
+    All fields are optional so the client can send only what it wants to change.
+
+    Rules:
+      - `username`:         new desired username (same validation as registration).
+      - `current_password`: REQUIRED when changing password (proves ownership).
+      - `new_password`:     the replacement password (min 8 chars).
+      - `daily_quota`:      self-service quota change (admin can set any value;
+                            regular users are capped at their current quota in
+                            the route handler).
+
+    At least one field must be present (enforced in the route handler).
+    """
+    username:         Optional[str] = None
+    current_password: Optional[str] = None   # proof of identity for pw change
+    new_password:     Optional[str] = None
+    daily_quota:      Optional[int] = None
+
+    @field_validator("username")
+    @classmethod
+    def username_no_spaces(cls, v: str) -> str:
+        if v is None:
+            return v
+        if " " in v:
+            raise ValueError("Username must not contain spaces.")
+        if len(v) < 3:
+            raise ValueError("Username must be at least 3 characters.")
+        return v.lower()
+
+    @field_validator("new_password")
+    @classmethod
+    def new_password_min_length(cls, v: str) -> str:
+        if v is None:
+            return v
+        if len(v) < 8:
+            raise ValueError("New password must be at least 8 characters.")
+        return v
+
+    @field_validator("daily_quota")
+    @classmethod
+    def quota_positive(cls, v: int) -> int:
+        if v is not None and v < 1:
+            raise ValueError("daily_quota must be at least 1.")
+        return v

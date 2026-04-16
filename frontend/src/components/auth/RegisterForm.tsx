@@ -28,13 +28,32 @@ export default function RegisterForm() {
     setLoading(true);
     try {
       await registerApi(values.username, values.password);
-      // Auto-login after registration
+    } catch (err: unknown) {
+      // Parse the actual backend error (FastAPI returns { detail: "..." })
+      let message = "Registration failed. Please try again.";
+      if (err && typeof err === "object" && "response" in err) {
+        try {
+          const body = await (err as { response: Response }).response.json();
+          if (body?.detail) message = body.detail;
+        } catch {
+          // response wasn't JSON — keep generic message
+        }
+      }
+      toast.error(message);
+      setLoading(false);
+      return;
+    }
+
+    // Registration succeeded — now try auto-login
+    try {
       const res = await login(values.username, values.password);
       authLogin(res.access_token);
       toast.success("Account created! Welcome aboard.");
       navigate("/", { replace: true });
     } catch {
-      toast.error("Username might already be taken. Try another.");
+      // Account was created but auto-login failed
+      toast.success("Account created! Please sign in.");
+      navigate("/login", { replace: true });
     } finally {
       setLoading(false);
     }

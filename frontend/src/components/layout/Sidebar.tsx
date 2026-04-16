@@ -63,28 +63,39 @@ function ACLogo() {
   );
 }
 
-export default function Sidebar() {
+interface SidebarProps {
+  isOpen: boolean;
+}
+
+export default function Sidebar({ isOpen }: SidebarProps) {
   const { user, logout } = useAuthStore();
 
   return (
-    <aside className="w-[260px] h-dvh flex flex-col bg-surface/80 backdrop-blur-md border-r border-border-subtle shrink-0 relative overflow-hidden">
+    <motion.aside 
+      initial={false}
+      animate={{ width: isOpen ? 260 : 72 }}
+      transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+      className="h-dvh flex flex-col bg-surface/80 backdrop-blur-md border-r border-border-subtle shrink-0 relative overflow-hidden"
+    >
       {/* Subtle grid background */}
       <div className="absolute inset-0 grid-bg-dense pointer-events-none opacity-40" />
 
       {/* Logo */}
-      <div className="relative z-10 flex items-center gap-3 px-5 h-[72px] border-b border-border-subtle">
+      <div className="relative z-10 flex items-center gap-3 px-5 h-[72px] border-b border-border-subtle overflow-hidden">
         <ACLogo />
-        <div className="flex flex-col">
-          <span
-            className="text-xs font-bold tracking-[0.12em] text-accent-cyan uppercase"
-            style={{ fontFamily: "var(--font-display)" }}
-          >
-            azna-cloud
-          </span>
-          <span className="text-[10px] text-muted tracking-wider" style={{ fontFamily: "var(--font-body)" }}>
-            Private Cloud
-          </span>
-        </div>
+        {isOpen && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col">
+            <span
+              className="text-xs font-bold tracking-[0.12em] text-accent-cyan uppercase whitespace-nowrap"
+              style={{ fontFamily: "var(--font-display)" }}
+            >
+              azna-cloud
+            </span>
+            <span className="text-[10px] text-muted tracking-wider whitespace-nowrap" style={{ fontFamily: "var(--font-body)" }}>
+              Private Cloud
+            </span>
+          </motion.div>
+        )}
       </div>
 
       {/* Navigation */}
@@ -127,10 +138,12 @@ export default function Sidebar() {
                       transition={{ type: "spring", stiffness: 350, damping: 30 }}
                     />
                   )}
-                  <Icon className="h-4 w-4 relative z-10" />
-                  <span className="relative z-10 flex-1" style={{ fontFamily: "var(--font-body)" }}>{label}</span>
-                  {isActive && (
-                    <ChevronRight className="h-3 w-3 relative z-10 text-accent-cyan/50" />
+                  <Icon className="h-4 w-4 relative z-10 shrink-0" />
+                  {isOpen && (
+                    <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="relative z-10 flex-1 whitespace-nowrap" style={{ fontFamily: "var(--font-body)" }}>{label}</motion.span>
+                  )}
+                  {isActive && isOpen && (
+                    <ChevronRight className="h-3 w-3 relative z-10 text-accent-cyan/50 shrink-0" />
                   )}
                 </>
               )}
@@ -147,12 +160,16 @@ export default function Sidebar() {
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.2, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
         >
-          <div className="flex items-center gap-3 px-3 h-10 rounded-[var(--radius-md)] text-sm text-muted/50 cursor-not-allowed select-none">
-            <Bell className="h-4 w-4" />
-            <span className="flex-1" style={{ fontFamily: "var(--font-body)" }}>Notifications</span>
-            <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-elevated/50 text-muted/40 border border-border-subtle/30">
-              Soon
-            </span>
+          <div className={cn("flex items-center px-3 h-10 rounded-[var(--radius-md)] text-sm text-muted/50 cursor-not-allowed select-none", isOpen ? "gap-3" : "justify-center")}>
+            <Bell className="h-4 w-4 shrink-0" />
+            {isOpen && (
+              <>
+                <span className="flex-1 whitespace-nowrap" style={{ fontFamily: "var(--font-body)" }}>Notifications</span>
+                <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-elevated/50 text-muted/40 border border-border-subtle/30 shrink-0">
+                  Soon
+                </span>
+              </>
+            )}
           </div>
         </motion.div>
 
@@ -167,11 +184,15 @@ export default function Sidebar() {
             >
               <NavLink
                 to="/admin"
-                className="relative flex items-center gap-3 px-3 h-10 rounded-[var(--radius-md)] text-sm font-medium text-accent-amber hover:bg-accent-amber/5 transition-all duration-300 nav-glow"
+                className={cn("relative flex items-center px-3 h-10 rounded-[var(--radius-md)] text-sm font-medium text-accent-amber hover:bg-accent-amber/5 transition-all duration-300 nav-glow overflow-hidden", isOpen ? "gap-3" : "justify-center")}
               >
-                <Shield className="h-4 w-4" />
-                <span style={{ fontFamily: "var(--font-body)" }}>Admin Portal</span>
-                <ChevronRight className="h-3 w-3 ml-auto text-accent-amber/50" />
+                <Shield className="h-4 w-4 shrink-0" />
+                {isOpen && (
+                  <>
+                    <span className="whitespace-nowrap" style={{ fontFamily: "var(--font-body)" }}>Admin Portal</span>
+                    <ChevronRight className="h-3 w-3 ml-auto text-accent-amber/50 shrink-0" />
+                  </>
+                )}
               </NavLink>
             </motion.div>
           </>
@@ -180,8 +201,8 @@ export default function Sidebar() {
 
       {/* User section */}
       <div className="relative z-10 px-3 py-4 border-t border-border-subtle">
-        <div className="flex items-center gap-3 px-3 mb-3">
-          <div className="relative">
+        <div className={cn("flex items-center mb-3", isOpen ? "gap-3 px-3" : "justify-center px-0")}>
+          <div className="relative shrink-0">
             <div className="h-9 w-9 rounded-full flex items-center justify-center text-xs font-bold text-accent-cyan uppercase"
               style={{
                 background: "linear-gradient(135deg, rgba(10,239,255,0.15), rgba(59,130,246,0.1))",
@@ -191,27 +212,29 @@ export default function Sidebar() {
             >
               {user?.username?.charAt(0) ?? "?"}
             </div>
-            {/* Online indicator */}
             <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-accent-green border-2 border-surface" />
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-primary truncate" style={{ fontFamily: "var(--font-body)" }}>
-              {user?.username ?? "Loading..."}
-            </p>
-            <p className="text-[10px] text-muted uppercase tracking-wider" style={{ fontFamily: "var(--font-display)" }}>
-              {user?.role ?? "user"}
-            </p>
-          </div>
+          {isOpen && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-primary truncate" style={{ fontFamily: "var(--font-body)" }}>
+                {user?.username ?? "Loading..."}
+              </p>
+              <p className="text-[10px] text-muted uppercase tracking-wider" style={{ fontFamily: "var(--font-display)" }}>
+                {user?.role ?? "user"}
+              </p>
+            </motion.div>
+          )}
         </div>
         <button
           onClick={logout}
-          className="flex items-center gap-3 px-3 h-9 w-full rounded-[var(--radius-md)] text-sm text-secondary hover:text-accent-red hover:bg-accent-red/5 transition-all duration-200 cursor-pointer group nav-glow"
+          className={cn("flex items-center h-9 w-full rounded-[var(--radius-md)] text-sm text-secondary hover:text-accent-red hover:bg-accent-red/5 transition-all duration-200 cursor-pointer group nav-glow", isOpen ? "gap-3 px-3" : "justify-center")}
           style={{ fontFamily: "var(--font-body)" }}
+          title={!isOpen ? "Sign out" : undefined}
         >
-          <LogOut className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" />
-          Sign out
+          <LogOut className="h-4 w-4 shrink-0 transition-transform group-hover:-translate-x-0.5" />
+          {isOpen && <span className="whitespace-nowrap">Sign out</span>}
         </button>
       </div>
-    </aside>
+    </motion.aside>
   );
 }

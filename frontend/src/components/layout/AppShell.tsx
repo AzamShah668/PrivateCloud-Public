@@ -1,12 +1,12 @@
 import { Outlet } from "react-router-dom";
 import { motion } from "motion/react";
-import { Search, Wifi } from "lucide-react";
+import { Wifi, Menu } from "lucide-react";
 import Sidebar from "./Sidebar";
 import BackgroundEffects from "./BackgroundEffects";
 import { useAuthStore } from "@/stores/auth-store";
 import { useState, useEffect } from "react";
 
-function TopBar() {
+function TopBar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   const user = useAuthStore((s) => s.user);
   const [time, setTime] = useState(new Date());
 
@@ -22,33 +22,20 @@ function TopBar() {
       transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
       className="flex items-center justify-between px-6 h-14 border-b border-border-subtle bg-surface/40 backdrop-blur-md shrink-0"
     >
-      {/* Left: Welcome + Region */}
+      {/* Left: Hamburger + Welcome */}
       <div className="flex items-center gap-4">
+        <button
+          onClick={onToggleSidebar}
+          className="p-1.5 -ml-2 rounded-[var(--radius-sm)] text-muted hover:text-primary hover:bg-elevated transition-colors cursor-pointer"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
         <span className="text-base text-secondary" style={{ fontFamily: "var(--font-body)" }}>
           Welcome back,{" "}
           <span className="text-primary font-semibold">
             {user?.username ?? "User"}
           </span>
         </span>
-        <span className="text-border-subtle">|</span>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted uppercase tracking-wider" style={{ fontFamily: "var(--font-display)" }}>
-            Active Region:
-          </span>
-          <span className="text-xs font-mono font-semibold text-accent-cyan px-2 py-0.5 rounded-[var(--radius-sm)] border border-accent-cyan/20 bg-accent-cyan/5">
-            US-EAST-01
-          </span>
-        </div>
-      </div>
-
-      {/* Center: Search */}
-      <div className="flex items-center gap-2 px-3 h-8 rounded-[var(--radius-md)] border border-border-subtle bg-elevated/50 min-w-[240px] transition-all duration-200 focus-within:border-accent-cyan/30 focus-within:bg-elevated focus-within:shadow-[0_0_12px_rgba(10,239,255,0.08)]">
-        <Search className="h-3.5 w-3.5 text-muted" />
-        <input
-          type="text"
-          placeholder="Search instances..."
-          className="bg-transparent text-xs text-primary placeholder:text-muted outline-none flex-1 font-mono"
-        />
       </div>
 
       {/* Right: Status + Time */}
@@ -75,17 +62,19 @@ function TopBar() {
 }
 
 export default function AppShell() {
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
   return (
     <div className="flex h-dvh bg-deepest overflow-hidden">
       {/* Background effects layer */}
       <BackgroundEffects />
 
-      <Sidebar />
+      <Sidebar isOpen={isSidebarOpen} />
       <div className="flex-1 flex flex-col overflow-hidden relative">
         {/* Subtle grid background */}
         <div className="absolute inset-0 grid-bg pointer-events-none opacity-30" />
         
-        <TopBar />
+        <TopBar onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)} />
         
         <main className="flex-1 flex flex-col overflow-y-auto relative z-10">
           <motion.div

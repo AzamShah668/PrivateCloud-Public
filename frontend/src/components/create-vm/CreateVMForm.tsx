@@ -2,7 +2,7 @@ import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
-import { Rocket, Info } from "lucide-react";
+import { Rocket } from "lucide-react";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import OSSelector from "./OSSelector";
@@ -30,7 +30,6 @@ export default function CreateVMForm() {
       ram_mb: 2048,
       storage_gb: 20,
       node: "pve",
-      use_template: false,
     },
   });
 
@@ -43,8 +42,8 @@ export default function CreateVMForm() {
   }
 
   async function onSubmit(data: CreateVMValues) {
-    await createMutation.mutateAsync(data);
-    navigate("/");
+    const job = await createMutation.mutateAsync(data);
+    navigate(`/vms/${job.id}`);
   }
 
   return (
@@ -118,46 +117,11 @@ export default function CreateVMForm() {
         />
       </motion.div>
 
-      {/* Template toggle */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.4, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-      >
-        <Controller
-          name="use_template"
-          control={control}
-          render={({ field }) => (
-            <label className="flex items-center gap-3 cursor-pointer group">
-              <div className="relative">
-                <input
-                  type="checkbox"
-                  checked={field.value}
-                  onChange={(e) => field.onChange(e.target.checked)}
-                  className="sr-only peer"
-                />
-                <div className="w-10 h-5 rounded-full bg-elevated border border-border-subtle transition-colors peer-checked:bg-accent-blue/20 peer-checked:border-accent-blue" />
-                <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-muted transition-all peer-checked:translate-x-5 peer-checked:bg-accent-blue" />
-              </div>
-              <span className="text-sm text-secondary group-hover:text-primary transition-colors">
-                Use cloud-init template (faster)
-              </span>
-              <span className="relative group/tip">
-                <Info className="h-3.5 w-3.5 text-muted" />
-                <span className="absolute left-6 top-1/2 -translate-y-1/2 px-3 py-1.5 rounded-[var(--radius-sm)] bg-elevated border border-border-subtle text-xs text-secondary whitespace-nowrap opacity-0 pointer-events-none group-hover/tip:opacity-100 transition-opacity z-10">
-                  Clones a pre-configured template instead of installing from ISO
-                </span>
-              </span>
-            </label>
-          )}
-        />
-      </motion.div>
-
       {/* Bottom review bar */}
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.5, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+        transition={{ delay: 0.4, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
         className="sticky bottom-0 -mx-8 px-8 py-4 bg-surface/80 backdrop-blur-sm border-t border-border-subtle"
       >
         <div className="flex items-center justify-between max-w-3xl">
@@ -169,12 +133,6 @@ export default function CreateVMForm() {
             <span>{formatRam(values.ram_mb)}</span>
             <span className="text-border-subtle">|</span>
             <span>{values.storage_gb} GB</span>
-            {values.use_template && (
-              <>
-                <span className="text-border-subtle">|</span>
-                <span className="text-accent-cyan">template</span>
-              </>
-            )}
           </div>
           <Button type="submit" loading={createMutation.isPending}>
             <Rocket className="h-4 w-4" />

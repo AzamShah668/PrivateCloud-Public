@@ -121,7 +121,7 @@ function ProgressRing({
 }
 
 export default function ResourceQuota({ vms }: ResourceQuotaProps) {
-  const instances = vms ?? [];
+  const instances = (vms ?? []).filter((v) => v.status !== "deleted");
   const runningVMs = instances.filter((v) => v.live_status === "running").length;
   const totalVMs = instances.length;
 

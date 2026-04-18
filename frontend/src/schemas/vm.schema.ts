@@ -20,7 +20,6 @@ export const createVMSchema = z.object({
   ram_mb: z.number().int().min(512).max(65536),
   storage_gb: z.number().int().min(10).max(500),
   node: z.string().default("pve"),
-  use_template: z.boolean().default(false),
 });
 
 export type CreateVMValues = z.infer<typeof createVMSchema>;

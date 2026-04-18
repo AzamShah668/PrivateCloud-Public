@@ -24,7 +24,7 @@ function StatusIcon({ status }: { status: string }) {
 }
 
 export default function MyInstances({ vms }: MyInstancesProps) {
-  const instances = vms ?? [];
+  const instances = (vms ?? []).filter((vm) => vm.status !== "deleted");
 
   return (
     <motion.div
@@ -89,13 +89,13 @@ export default function MyInstances({ vms }: MyInstancesProps) {
               {/* Status icon */}
               <StatusIcon status={vm.live_status ?? vm.status} />
 
-              {/* Name + ID */}
+              {/* Name + ID + IP */}
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-primary truncate" style={{ fontFamily: "var(--font-body)" }}>
                   {vm.vm_name}
                 </p>
                 <p className="text-[10px] text-muted font-mono">
-                  ID: {vm.vmid}
+                  {vm.vm_ip ? vm.vm_ip : `ID: ${vm.vmid}`}
                 </p>
               </div>
 

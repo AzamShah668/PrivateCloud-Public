@@ -28,7 +28,8 @@ export default function AdminVMsPage() {
     const matchesSearch =
       vm.vm_name.toLowerCase().includes(search.toLowerCase()) ||
       vm.owner_username.toLowerCase().includes(search.toLowerCase()) ||
-      vm.os_choice.toLowerCase().includes(search.toLowerCase());
+      vm.os_choice.toLowerCase().includes(search.toLowerCase()) ||
+      (vm.vm_ip ?? "").toLowerCase().includes(search.toLowerCase());
     const matchesStatus =
       statusFilter === "all" || vm.status === statusFilter;
     return matchesSearch && matchesStatus;
@@ -114,7 +115,7 @@ export default function AdminVMsPage() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-border-subtle">
-                {["VM Name", "Owner", "VMID", "OS", "Resources", "Status", "Created"].map(
+                {["VM Name", "Owner", "VMID", "IP Address", "OS", "Resources", "Status", "Created"].map(
                   (h) => (
                     <th
                       key={h}
@@ -156,6 +157,9 @@ export default function AdminVMsPage() {
                     <td className="px-4 py-3 text-xs text-muted font-mono">
                       {vm.vmid}
                     </td>
+                    <td className="px-4 py-3 text-xs text-secondary font-mono">
+                      {vm.vm_ip ?? "—"}
+                    </td>
                     <td className="px-4 py-3 text-xs text-secondary">
                       {vm.os_choice}
                     </td>
@@ -194,7 +198,7 @@ export default function AdminVMsPage() {
               {filtered.length === 0 && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-4 py-12 text-center text-sm text-muted"
                   >
                     {isLoading ? "Loading..." : "No VMs found"}

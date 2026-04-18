@@ -28,6 +28,9 @@ export interface VMJobAdmin {
   request_payload: Record<string, unknown>;
   proxmox_response: Record<string, unknown> | null;
   error_message: string | null;
+  vm_ip: string | null;
+  vm_username: string | null;
+  vm_password: string | null;
   created_at: string;
   updated_at: string;
 }

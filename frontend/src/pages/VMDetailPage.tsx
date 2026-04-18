@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { motion } from "motion/react";
-import { ArrowLeft, Monitor, Hash, Calendar, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Monitor, Hash, Calendar, AlertTriangle, Globe, User, KeyRound, Terminal, Copy, Check } from "lucide-react";
 import Header from "@/components/layout/Header";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
@@ -126,11 +126,52 @@ export default function VMDetailPage() {
           />
         </motion.div>
 
+        {/* Connection Info — shown when VM has credentials */}
+        {(vm.vm_ip || vm.vm_username) && (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+            className="glass-panel rounded-[var(--radius-lg)] p-6 relative overflow-hidden"
+          >
+            <div
+              className="absolute top-0 left-6 right-6 h-[1px]"
+              style={{
+                background: "linear-gradient(90deg, transparent, rgba(10,239,255,0.2), transparent)",
+              }}
+            />
+            <h3
+              className="text-xs font-bold uppercase tracking-[0.15em] text-primary mb-4"
+              style={{ fontFamily: "var(--font-display)" }}
+            >
+              Connection Info
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+              {vm.vm_ip && (
+                <CopyableField icon={<Globe className="h-3.5 w-3.5" />} label="IP Address" value={vm.vm_ip} />
+              )}
+              {vm.vm_username && (
+                <CopyableField icon={<User className="h-3.5 w-3.5" />} label="Username" value={vm.vm_username} />
+              )}
+              {vm.vm_password && (
+                <CopyableField icon={<KeyRound className="h-3.5 w-3.5" />} label="Password" value={vm.vm_password} />
+              )}
+            </div>
+            {vm.vm_ip && vm.vm_username && (
+              <CopyableField
+                icon={<Terminal className="h-3.5 w-3.5" />}
+                label="SSH Command"
+                value={`ssh ${vm.vm_username}@${vm.vm_ip}`}
+              />
+            )}
+          </motion.div>
+        )}
+
         {/* Live Metrics */}
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ delay: 0.25, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
           className="glass-panel rounded-[var(--radius-lg)] p-6 relative overflow-hidden"
         >
           <div
@@ -152,7 +193,7 @@ export default function VMDetailPage() {
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ delay: 0.35, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
           className="glass-panel rounded-[var(--radius-lg)] p-6 relative overflow-hidden"
         >
           <div
@@ -235,6 +276,42 @@ function InfoRow({
       <div>
         <p className="text-[9px] text-muted uppercase tracking-[0.1em] font-semibold">{label}</p>
         <p className="text-sm text-primary font-mono">{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function CopyableField({
+  icon,
+  label,
+  value,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  function handleCopy() {
+    navigator.clipboard.writeText(value);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <div className="rounded-[var(--radius-md)] bg-elevated/50 border border-border-subtle p-3 group">
+      <span className="text-[9px] text-muted uppercase tracking-[0.1em] flex items-center gap-1 mb-1.5 font-semibold">
+        {icon} {label}
+      </span>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-mono font-semibold text-primary truncate">{value}</span>
+        <button
+          onClick={handleCopy}
+          className="shrink-0 p-1 rounded-[var(--radius-sm)] text-muted hover:text-accent-cyan hover:bg-accent-cyan/10 transition-colors cursor-pointer"
+          title="Copy to clipboard"
+        >
+          {copied ? <Check className="h-3.5 w-3.5 text-accent-green" /> : <Copy className="h-3.5 w-3.5" />}
+        </button>
       </div>
     </div>
   );

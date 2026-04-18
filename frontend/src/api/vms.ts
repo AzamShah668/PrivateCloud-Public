@@ -10,6 +10,9 @@ export interface VMJob {
   request_payload: Record<string, unknown>;
   proxmox_response: Record<string, unknown> | null;
   error_message: string | null;
+  vm_ip: string | null;
+  vm_username: string | null;
+  vm_password: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -31,7 +34,6 @@ export interface CreateVMPayload {
   ram_mb: number;
   storage_gb: number;
   node?: string;
-  use_template?: boolean;
 }
 
 export interface UpdateVMPayload {

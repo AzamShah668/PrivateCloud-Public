@@ -68,6 +68,10 @@ function deriveActivities(vms: VMEnriched[]): ActivityEvent[] {
         actionText = "Deployment failed";
         icon = <Trash2 className="h-3 w-3" />;
         color = "#EF4444";
+      } else if (vm.status === "deleted") {
+        actionText = "Instance deleted";
+        icon = <Trash2 className="h-3 w-3" />;
+        color = "#6B7280";
       } else if (status === "done") {
         actionText = "Deployment completed";
         icon = <Maximize2 className="h-3 w-3" />;

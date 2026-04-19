@@ -10,11 +10,26 @@ import {
 } from "@/api/vms";
 import { toast } from "sonner";
 
+// Poll faster while any VM is still being provisioned so the UI transitions
+// out of the "Provisioning…" state promptly. Once all VMs have reached a
+// terminal status, fall back to a relaxed 10s interval.
+function pollIntervalForList(data: Awaited<ReturnType<typeof listVMs>> | undefined) {
+  if (!data) return 10_000;
+  return data.some((vm) => vm.status === "queued" || vm.status === "running")
+    ? 3_000
+    : 10_000;
+}
+
+function pollIntervalForSingle(data: Awaited<ReturnType<typeof getVM>> | undefined) {
+  if (!data) return 10_000;
+  return data.status === "queued" || data.status === "running" ? 3_000 : 10_000;
+}
+
 export function useVMs() {
   return useQuery({
     queryKey: ["vms"],
     queryFn: listVMs,
-    refetchInterval: 10_000,
+    refetchInterval: (query) => pollIntervalForList(query.state.data),
   });
 }
 
@@ -22,7 +37,7 @@ export function useVM(jobId: number) {
   return useQuery({
     queryKey: ["vms", jobId],
     queryFn: () => getVM(jobId),
-    refetchInterval: 10_000,
+    refetchInterval: (query) => pollIntervalForSingle(query.state.data),
   });
 }
 

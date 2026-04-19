@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { motion } from "motion/react";
-import { ArrowLeft, Monitor, Hash, Calendar, AlertTriangle, Globe, User, KeyRound, Terminal, Copy, Check } from "lucide-react";
+import { ArrowLeft, Monitor, Hash, Calendar, AlertTriangle, Globe, User, KeyRound, Terminal, Copy, Check, Loader2 } from "lucide-react";
 import Header from "@/components/layout/Header";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
@@ -73,6 +73,13 @@ export default function VMDetailPage() {
   const currentCpu = toNum(payload.cpu_cores, 2);
   const currentRam = toNum(payload.ram_mb, 2048);
 
+  // While the background job is still cloning/starting/polling for an IP,
+  // the VM isn't usable yet — any action PATCH returns 409 Conflict.
+  const isProvisioning = vm.status === "queued" || vm.status === "running";
+  const isFailed = vm.status === "failed";
+  // IP polling timed out but VM is otherwise up.
+  const ipTimedOut = vm.status === "done" && !vm.vm_ip;
+
   function handleAction(action: "start" | "stop" | "restart") {
     updateMutation.mutate({ jobId: vm!.id, payload: { action } });
   }
@@ -109,25 +116,83 @@ export default function VMDetailPage() {
       />
 
       <main className="flex-1 overflow-y-auto p-6 space-y-6">
-        {/* Actions */}
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-        >
-          <ActionBar
-            liveStatus={liveStatus}
-            onStart={() => handleAction("start")}
-            onStop={() => handleAction("stop")}
-            onRestart={() => handleAction("restart")}
-            onResize={() => setResizeOpen(true)}
-            onDelete={() => setDeleteOpen(true)}
-            isPending={updateMutation.isPending}
-          />
-        </motion.div>
+        {/* Provisioning banner — shown while the background job is still running */}
+        {isProvisioning && (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+            className="glass-panel rounded-[var(--radius-lg)] p-6 relative overflow-hidden"
+          >
+            <div
+              className="absolute top-0 left-6 right-6 h-[1px]"
+              style={{
+                background: "linear-gradient(90deg, transparent, rgba(10,239,255,0.3), transparent)",
+              }}
+            />
+            <div className="flex items-start gap-4">
+              <Loader2 className="h-6 w-6 text-accent-cyan animate-spin shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <h3
+                  className="text-xs font-bold uppercase tracking-[0.15em] text-accent-cyan mb-1"
+                  style={{ fontFamily: "var(--font-display)" }}
+                >
+                  Provisioning your VM
+                </h3>
+                <p className="text-sm text-primary">
+                  {vm.status === "queued"
+                    ? "Queued — waiting to clone the disk image."
+                    : "Cloning image, booting, and waiting for an IP address. This can take a few minutes."}
+                </p>
+                <p className="text-xs text-secondary mt-2">
+                  You don't need to do anything — connection details and controls will appear automatically when the VM is ready.
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* IP timed out — VM is up but guest agent never reported an IP */}
+        {ipTimedOut && (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+            className="rounded-[var(--radius-lg)] bg-accent-yellow/5 border border-accent-yellow/20 p-4"
+          >
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-accent-yellow shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm text-primary font-medium">VM is running, but no IP was reported</p>
+                <p className="text-xs text-secondary mt-1">
+                  The QEMU guest agent didn't respond in time. Try restarting the VM — connection details will populate once the agent reports an IP.
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Actions — hidden while provisioning so users can't trigger 409 conflicts */}
+        {!isProvisioning && (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <ActionBar
+              liveStatus={liveStatus}
+              onStart={() => handleAction("start")}
+              onStop={() => handleAction("stop")}
+              onRestart={() => handleAction("restart")}
+              onResize={() => setResizeOpen(true)}
+              onDelete={() => setDeleteOpen(true)}
+              isPending={updateMutation.isPending}
+            />
+          </motion.div>
+        )}
 
         {/* Connection Info — shown when VM has credentials */}
-        {(vm.vm_ip || vm.vm_username) && (
+        {!isProvisioning && (vm.vm_ip || vm.vm_username) && (
           <motion.div
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
@@ -167,27 +232,29 @@ export default function VMDetailPage() {
           </motion.div>
         )}
 
-        {/* Live Metrics */}
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.25, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-          className="glass-panel rounded-[var(--radius-lg)] p-6 relative overflow-hidden"
-        >
-          <div
-            className="absolute top-0 left-6 right-6 h-[1px]"
-            style={{
-              background: "linear-gradient(90deg, transparent, rgba(10,239,255,0.1), transparent)",
-            }}
-          />
-          <h3
-            className="text-xs font-bold uppercase tracking-[0.15em] text-primary mb-4"
-            style={{ fontFamily: "var(--font-display)" }}
+        {/* Live Metrics — only meaningful once the VM is actually running */}
+        {!isProvisioning && !isFailed && (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.25, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+            className="glass-panel rounded-[var(--radius-lg)] p-6 relative overflow-hidden"
           >
-            Live Metrics
-          </h3>
-          <LiveMetrics vm={vm} />
-        </motion.div>
+            <div
+              className="absolute top-0 left-6 right-6 h-[1px]"
+              style={{
+                background: "linear-gradient(90deg, transparent, rgba(10,239,255,0.1), transparent)",
+              }}
+            />
+            <h3
+              className="text-xs font-bold uppercase tracking-[0.15em] text-primary mb-4"
+              style={{ fontFamily: "var(--font-display)" }}
+            >
+              Live Metrics
+            </h3>
+            <LiveMetrics vm={vm} />
+          </motion.div>
+        )}
 
         {/* Info Section */}
         <motion.div

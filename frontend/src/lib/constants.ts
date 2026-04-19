@@ -20,4 +20,4 @@ export const STATUS_COLORS: Record<string, string> = {
 };
 
 export const API_BASE =
-  import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
+  import.meta.env.VITE_API_BASE ?? "/api";

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import type { VMEnriched } from "@/api/vms";
+import SpotlightCard from "@/components/ui/SpotlightCard";
+import GlitchText from "@/components/ui/GlitchText";
 
 interface ResourceQuotaProps {
   vms?: VMEnriched[];
@@ -146,11 +148,11 @@ export default function ResourceQuota({ vms }: ResourceQuotaProps) {
   const maxStorageGB = 500;
 
   return (
-    <motion.div
+    <SpotlightCard
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.15, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-      className="glass-panel rounded-[var(--radius-lg)] p-6 relative overflow-hidden h-full"
+      className="p-6 relative overflow-hidden h-full"
     >
       {/* Top accent line */}
       <div
@@ -162,14 +164,12 @@ export default function ResourceQuota({ vms }: ResourceQuotaProps) {
 
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
-        <h2
-          className="text-sm font-bold tracking-wide text-primary"
-          style={{ fontFamily: "var(--font-display)" }}
-        >
-          Resource Quota
-        </h2>
-        <div className="flex items-center gap-1.5">
-          <span className="h-1.5 w-1.5 rounded-full bg-accent-green animate-pulse-status" />
+        <GlitchText
+          text="Resource Quota"
+          className="text-base font-bold tracking-wide text-primary"
+        />
+        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-accent-green/10 border border-accent-green/20">
+          <span className="h-1.5 w-1.5 rounded-full bg-accent-green animate-pulse-status shadow-[0_0_8px_#10B981]" />
           <span className="text-[10px] text-accent-green font-mono uppercase tracking-wider">
             {runningVMs} active
           </span>
@@ -211,6 +211,6 @@ export default function ResourceQuota({ vms }: ResourceQuotaProps) {
           delay={0.5}
         />
       </div>
-    </motion.div>
+    </SpotlightCard>
   );
 }

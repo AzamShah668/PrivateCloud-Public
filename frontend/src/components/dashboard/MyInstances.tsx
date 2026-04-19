@@ -11,6 +11,8 @@ import {
 import { Link } from "react-router-dom";
 import Badge from "@/components/ui/Badge";
 import type { VMEnriched } from "@/api/vms";
+import SpotlightCard from "@/components/ui/SpotlightCard";
+import GlitchText from "@/components/ui/GlitchText";
 
 interface MyInstancesProps {
   vms?: VMEnriched[];
@@ -27,11 +29,11 @@ export default function MyInstances({ vms }: MyInstancesProps) {
   const instances = (vms ?? []).filter((vm) => vm.status !== "deleted");
 
   return (
-    <motion.div
+    <SpotlightCard
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-      className="glass-panel rounded-[var(--radius-lg)] p-6 relative overflow-hidden h-full"
+      className="p-6 relative overflow-hidden h-full"
     >
       {/* Top accent line */}
       <div
@@ -43,12 +45,10 @@ export default function MyInstances({ vms }: MyInstancesProps) {
 
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
-        <h2
-          className="text-sm font-bold tracking-wide text-primary"
-          style={{ fontFamily: "var(--font-display)" }}
-        >
-          My Instances
-        </h2>
+        <GlitchText
+          text="My Instances"
+          className="text-base font-bold tracking-wide text-primary"
+        />
         <span className="text-xs text-muted font-mono">
           {instances.length} total
         </span>
@@ -56,16 +56,18 @@ export default function MyInstances({ vms }: MyInstancesProps) {
 
       {instances.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 text-center">
-          <div
-            className="h-16 w-16 rounded-full flex items-center justify-center mb-4"
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
+            className="h-16 w-16 rounded-full flex items-center justify-center mb-4 relative"
             style={{
               background: "radial-gradient(circle, rgba(10,239,255,0.08) 0%, transparent 70%)",
-              border: "1px solid rgba(10,239,255,0.1)",
+              border: "1px dashed rgba(10,239,255,0.3)",
             }}
           >
-            <CircleDot className="h-7 w-7 text-accent-cyan/40" />
-          </div>
-          <p className="text-sm text-secondary mb-1" style={{ fontFamily: "var(--font-body)" }}>
+            <CircleDot className="h-7 w-7 text-accent-cyan/80 drop-shadow-[0_0_8px_rgba(10,239,255,0.8)]" />
+          </motion.div>
+          <p className="text-sm font-bold text-primary mb-1 tracking-wide" style={{ fontFamily: "var(--font-display)" }}>
             No instances yet
           </p>
           <p className="text-xs text-muted">
@@ -84,10 +86,13 @@ export default function MyInstances({ vms }: MyInstancesProps) {
                 duration: 0.35,
                 ease: [0.16, 1, 0.3, 1],
               }}
-              className="group flex items-center gap-3 px-3 py-2.5 rounded-[var(--radius-md)] hover:bg-elevated/40 transition-all duration-200 nav-glow"
+              className="group flex items-center gap-3 px-4 py-3 rounded-xl border border-border-subtle/40 bg-surface/50 hover:bg-elevated/80 hover:border-accent-cyan/40 hover:shadow-[0_0_15px_-3px_rgba(10,239,255,0.2)] transition-all duration-300"
             >
-              {/* Status icon */}
-              <StatusIcon status={vm.live_status ?? vm.status} />
+              {/* Status icon with glow */}
+              <div className="relative flex items-center justify-center">
+                <div className="absolute inset-0 blur-sm opacity-50"><StatusIcon status={vm.live_status ?? vm.status} /></div>
+                <StatusIcon status={vm.live_status ?? vm.status} />
+              </div>
 
               {/* Name + ID + IP */}
               <div className="flex-1 min-w-0">
@@ -134,6 +139,6 @@ export default function MyInstances({ vms }: MyInstancesProps) {
           ))}
         </div>
       )}
-    </motion.div>
+    </SpotlightCard>
   );
 }

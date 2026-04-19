@@ -2,6 +2,8 @@ import { motion } from "motion/react";
 import { Link } from "react-router-dom";
 import { PlusCircle, Cpu, HardDrive, MemoryStick, Rocket } from "lucide-react";
 import Button from "@/components/ui/Button";
+import SpotlightCard from "@/components/ui/SpotlightCard";
+import GlitchText from "@/components/ui/GlitchText";
 
 const presets = [
   {
@@ -29,11 +31,11 @@ const presets = [
 
 export default function QuickDeploy() {
   return (
-    <motion.div
+    <SpotlightCard
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.3, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-      className="glass-panel rounded-[var(--radius-lg)] p-6 relative overflow-hidden"
+      className="p-6 relative overflow-hidden"
     >
       {/* Animated border glow */}
       <div
@@ -71,12 +73,10 @@ export default function QuickDeploy() {
           >
             <Rocket className="h-4 w-4 text-accent-cyan" />
           </div>
-          <h2
-            className="text-sm font-bold tracking-wide text-primary"
-            style={{ fontFamily: "var(--font-display)" }}
-          >
-            Quick Deploy
-          </h2>
+          <GlitchText
+            text="Quick Deploy"
+            className="text-base font-bold tracking-wide text-primary"
+          />
         </div>
       </div>
 
@@ -95,13 +95,36 @@ export default function QuickDeploy() {
           >
             <Link
               to={`/vms/create?os=${preset.os}`}
-              className="group flex items-center gap-3 px-3 py-2.5 rounded-[var(--radius-md)] hover:bg-elevated/40 transition-all duration-200 nav-glow"
+              className="group flex items-center gap-4 px-4 py-3 rounded-xl border border-border-subtle/40 bg-surface/50 hover:bg-elevated/80 transition-all duration-300 overflow-hidden relative"
             >
-              <span className="text-lg" role="img" aria-label={preset.name}>
-                {preset.icon}
-              </span>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-primary group-hover:text-accent-cyan transition-colors" style={{ fontFamily: "var(--font-body)" }}>
+              {/* Animated hover gradient background */}
+              <div
+                className="absolute inset-0 opacity-0 group-hover:opacity-10 transition-opacity duration-500 pointer-events-none"
+                style={{
+                  background: `linear-gradient(90deg, transparent, ${preset.color}, transparent)`,
+                }}
+              />
+              {/* Animated hover border top */}
+              <div
+                className="absolute top-0 left-0 right-0 h-[1px] opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
+                style={{
+                  background: `linear-gradient(90deg, transparent, ${preset.color}, transparent)`,
+                }}
+              />
+
+              {/* Glowing Icon */}
+              <div className="relative flex items-center justify-center">
+                <div 
+                  className="absolute inset-0 blur-md opacity-20 group-hover:opacity-60 transition-opacity duration-300 rounded-full"
+                  style={{ backgroundColor: preset.color }}
+                />
+                <span className="text-xl relative z-10" role="img" aria-label={preset.name}>
+                  {preset.icon}
+                </span>
+              </div>
+              
+              <div className="flex-1 relative z-10">
+                <p className="text-sm font-medium text-primary group-hover:text-white transition-colors" style={{ fontFamily: "var(--font-body)" }}>
                   {preset.name}
                 </p>
                 <div className="flex items-center gap-2 text-[10px] text-muted">
@@ -113,7 +136,7 @@ export default function QuickDeploy() {
                   <span>{preset.specs}</span>
                 </div>
               </div>
-              <PlusCircle className="h-4 w-4 text-muted group-hover:text-accent-cyan transition-colors" />
+              <PlusCircle className="h-4 w-4 text-muted group-hover:text-accent-cyan transition-colors relative z-10" />
             </Link>
           </motion.div>
         ))}
@@ -126,6 +149,6 @@ export default function QuickDeploy() {
           Custom Instance
         </Button>
       </Link>
-    </motion.div>
+    </SpotlightCard>
   );
 }

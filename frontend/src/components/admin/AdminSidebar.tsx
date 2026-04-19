@@ -13,6 +13,7 @@ import {
 import { motion } from "motion/react";
 import { useAuthStore } from "@/stores/auth-store";
 import { cn } from "@/lib/cn";
+import GlitchText from "@/components/ui/GlitchText";
 
 const navItems = [
   { to: "/admin", icon: LayoutDashboard, label: "Dashboard" },
@@ -82,7 +83,7 @@ function AdminLogo() {
   );
 }
 
-export default function AdminSidebar() {
+export default function AdminSidebar({ onClose }: { onClose?: () => void }) {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
 
@@ -153,10 +154,11 @@ export default function AdminSidebar() {
             <NavLink
               to={to}
               end={to === "/admin"}
+              onClick={onClose}
               className={({ isActive }) =>
                 cn(
                   "relative flex items-center gap-3 px-3 h-10 rounded-[var(--radius-md)]",
-                  "text-sm font-medium transition-all duration-300",
+                  "text-sm font-medium transition-all duration-300 group",
                   isActive
                     ? "text-accent-amber"
                     : "text-secondary hover:text-primary hover:bg-elevated/50 nav-glow"
@@ -184,12 +186,18 @@ export default function AdminSidebar() {
                     />
                   )}
                   <Icon className="h-4 w-4 relative z-10" />
-                  <span
-                    className="relative z-10 flex-1"
-                    style={{ fontFamily: "var(--font-body)" }}
-                  >
-                    {label}
-                  </span>
+                  {isActive ? (
+                    <div className="relative z-10 flex-1 overflow-hidden" style={{ fontFamily: "var(--font-display)" }}>
+                      <GlitchText text={label} className="font-bold tracking-wide" />
+                    </div>
+                  ) : (
+                    <span
+                      className="relative z-10 flex-1 group-hover:translate-x-1 transition-transform duration-300"
+                      style={{ fontFamily: "var(--font-body)" }}
+                    >
+                      {label}
+                    </span>
+                  )}
                   {isActive && (
                     <ChevronRight className="h-3 w-3 relative z-10 text-accent-amber/50" />
                   )}
@@ -224,10 +232,11 @@ export default function AdminSidebar() {
           >
             <NavLink
               to={to}
+              onClick={onClose}
               className={({ isActive }) =>
                 cn(
                   "relative flex items-center gap-3 px-3 h-10 rounded-[var(--radius-md)]",
-                  "text-sm font-medium transition-all duration-300",
+                  "text-sm font-medium transition-all duration-300 group",
                   isActive
                     ? "text-accent-amber"
                     : "text-secondary hover:text-primary hover:bg-elevated/50 nav-glow"
@@ -255,12 +264,18 @@ export default function AdminSidebar() {
                     />
                   )}
                   <Icon className="h-4 w-4 relative z-10" />
-                  <span
-                    className="relative z-10 flex-1"
-                    style={{ fontFamily: "var(--font-body)" }}
-                  >
-                    {label}
-                  </span>
+                  {isActive ? (
+                    <div className="relative z-10 flex-1 overflow-hidden" style={{ fontFamily: "var(--font-display)" }}>
+                      <GlitchText text={label} className="font-bold tracking-wide" />
+                    </div>
+                  ) : (
+                    <span
+                      className="relative z-10 flex-1 group-hover:translate-x-1 transition-transform duration-300"
+                      style={{ fontFamily: "var(--font-body)" }}
+                    >
+                      {label}
+                    </span>
+                  )}
                   {isActive && (
                     <ChevronRight className="h-3 w-3 relative z-10 text-accent-amber/50" />
                   )}

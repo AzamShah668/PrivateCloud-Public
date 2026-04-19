@@ -7,6 +7,7 @@ import RecentActivity from "@/components/dashboard/RecentActivity";
 import QuickDeploy from "@/components/dashboard/QuickDeploy";
 import QuotaIndicator from "@/components/dashboard/QuotaIndicator";
 import Button from "@/components/ui/Button";
+import GlitchText from "@/components/ui/GlitchText";
 import { useVMs } from "@/hooks/use-vms";
 
 export default function DashboardPage() {
@@ -33,13 +34,11 @@ export default function DashboardPage() {
         className="flex items-center justify-between px-6 py-4 border-b border-border-subtle/50"
       >
         <div>
-          <h1
-            className="text-lg font-bold text-primary"
-            style={{ fontFamily: "var(--font-display)", letterSpacing: "0.02em" }}
-          >
-            Dashboard
-          </h1>
-          <p className="text-xs text-muted mt-0.5" style={{ fontFamily: "var(--font-body)" }}>
+          <GlitchText
+            text="Dashboard"
+            className="text-2xl font-bold text-primary mb-1"
+          />
+          <p className="text-sm text-muted mt-0.5" style={{ fontFamily: "var(--font-body)" }}>
             Your cloud infrastructure at a glance
           </p>
         </div>

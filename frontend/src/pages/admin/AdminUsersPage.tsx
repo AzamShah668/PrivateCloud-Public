@@ -10,6 +10,7 @@ import { useAdminUsers, useUpdateUserRole, useUpdateUserQuota } from "@/hooks/us
 import { cn } from "@/lib/cn";
 import { toast } from "sonner";
 import type { UserResponse } from "@/api/auth";
+import GlitchText from "@/components/ui/GlitchText";
 
 export default function AdminUsersPage() {
   const { data: users, isLoading, refetch } = useAdminUsers();
@@ -56,12 +57,10 @@ export default function AdminUsersPage() {
         className="flex items-center justify-between"
       >
         <div>
-          <h1
+          <GlitchText
+            text="User Management"
             className="text-2xl font-bold text-primary tracking-tight"
-            style={{ fontFamily: "var(--font-display)" }}
-          >
-            User Management
-          </h1>
+          />
           <p
             className="text-sm text-muted mt-1"
             style={{ fontFamily: "var(--font-body)" }}

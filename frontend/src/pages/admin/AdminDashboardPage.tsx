@@ -11,6 +11,7 @@ import AnimatedStatCard from "@/components/dashboard/AnimatedStatCard";
 import AdminClusterHealth from "@/components/admin/AdminClusterHealth";
 import AdminLiveCharts from "@/components/admin/AdminLiveCharts";
 import AdminRecentActivity from "@/components/admin/AdminRecentActivity";
+import GlitchText from "@/components/ui/GlitchText";
 
 export default function AdminDashboardPage() {
   const { data: stats } = useAdminStats();
@@ -25,12 +26,10 @@ export default function AdminDashboardPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
       >
-        <h1
+        <GlitchText
+          text="Command Center"
           className="text-2xl font-bold text-primary tracking-tight"
-          style={{ fontFamily: "var(--font-display)" }}
-        >
-          Command Center
-        </h1>
+        />
         <p
           className="text-sm text-muted mt-1"
           style={{ fontFamily: "var(--font-body)" }}

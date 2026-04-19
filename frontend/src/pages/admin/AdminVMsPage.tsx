@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useAdminVMs } from "@/hooks/use-admin";
 import { cn } from "@/lib/cn";
+import GlitchText from "@/components/ui/GlitchText";
 
 const STATUS_STYLES: Record<string, string> = {
   done: "bg-accent-green/10 text-accent-green border-accent-green/20",
@@ -47,12 +48,10 @@ export default function AdminVMsPage() {
         className="flex items-center justify-between"
       >
         <div>
-          <h1
+          <GlitchText
+            text="Virtual Machines"
             className="text-2xl font-bold text-primary tracking-tight"
-            style={{ fontFamily: "var(--font-display)" }}
-          >
-            Virtual Machines
-          </h1>
+          />
           <p
             className="text-sm text-muted mt-1"
             style={{ fontFamily: "var(--font-body)" }}
@@ -141,7 +140,7 @@ export default function AdminVMsPage() {
                       duration: 0.3,
                       ease: [0.16, 1, 0.3, 1],
                     }}
-                    className="border-b border-border-subtle/50 hover:bg-elevated/20 transition-colors"
+                    className="border-b border-border-subtle/50 hover:bg-elevated/40 hover:shadow-[inset_0_0_20px_rgba(10,239,255,0.05)] transition-all duration-300 group"
                   >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">

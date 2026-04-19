@@ -1,4 +1,5 @@
 import { type ReactNode } from "react";
+import GlitchText from "@/components/ui/GlitchText";
 
 interface HeaderProps {
   title: string;
@@ -13,15 +14,15 @@ export default function Header({ title, subtitle, actions }: HeaderProps) {
       <div
         className="absolute top-0 left-0 right-0 h-[1px]"
         style={{
-          background: "linear-gradient(90deg, transparent, rgba(10,239,255,0.1), transparent)",
+          background: "linear-gradient(90deg, transparent, rgba(217, 70, 239, 0.4), rgba(10,239,255,0.4), transparent)",
         }}
       />
       <div>
         <h1
-          className="text-2xl font-bold text-primary tracking-wide"
+          className="text-2xl font-bold tracking-wide"
           style={{ fontFamily: "var(--font-display)" }}
         >
-          {title}
+          <GlitchText text={title} />
         </h1>
         {subtitle && <p className="text-sm text-muted mt-1">{subtitle}</p>}
       </div>

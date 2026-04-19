@@ -1,12 +1,12 @@
 import { Outlet } from "react-router-dom";
 import { motion } from "motion/react";
-import { Search, Wifi, Shield } from "lucide-react";
+import { Search, Wifi, Shield, Menu } from "lucide-react";
 import AdminSidebar from "./AdminSidebar";
 import BackgroundEffects from "@/components/layout/BackgroundEffects";
 import { useAuthStore } from "@/stores/auth-store";
 import { useState, useEffect } from "react";
 
-function AdminTopBar() {
+function AdminTopBar({ toggleSidebar }: { toggleSidebar: () => void }) {
   const user = useAuthStore((s) => s.user);
   const [time, setTime] = useState(new Date());
 
@@ -24,6 +24,12 @@ function AdminTopBar() {
     >
       {/* Left: Admin badge + Welcome */}
       <div className="flex items-center gap-4">
+        <button
+          onClick={toggleSidebar}
+          className="p-1.5 rounded-[var(--radius-sm)] text-muted hover:text-primary hover:bg-elevated/80 hover:shadow-[0_0_15px_rgba(245,158,11,0.2)] transition-all duration-300"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
         <div className="flex items-center gap-2 px-2.5 py-1 rounded-[var(--radius-sm)] border border-accent-amber/20 bg-accent-amber/5">
           <Shield className="h-3.5 w-3.5 text-accent-amber" />
           <span
@@ -82,13 +88,31 @@ function AdminTopBar() {
 }
 
 export default function AdminShell() {
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
   return (
-    <div className="flex h-dvh bg-deepest overflow-hidden">
+    <div className="flex h-dvh bg-deepest overflow-hidden relative">
       <BackgroundEffects />
-      <AdminSidebar />
-      <div className="flex-1 flex flex-col overflow-hidden relative">
+
+      {/* Sidebar Wrapper */}
+      <motion.div
+        initial={false}
+        animate={{ 
+          width: isSidebarOpen ? 260 : 0, 
+          x: isSidebarOpen ? 0 : -260 
+        }}
+        transition={{ type: "spring", stiffness: 300, damping: 30 }}
+        className="relative z-50 h-full shrink-0 shadow-2xl border-r border-border-subtle bg-surface/80"
+      >
+        {/* Force inner width to always be 260px so content doesn't squash during animation */}
+        <div className="w-[260px] h-full">
+          <AdminSidebar />
+        </div>
+      </motion.div>
+
+      <div className="flex-1 flex flex-col overflow-hidden relative z-10 w-full">
         <div className="absolute inset-0 grid-bg pointer-events-none opacity-30" />
-        <AdminTopBar />
+        <AdminTopBar toggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)} />
         <main className="flex-1 flex flex-col overflow-y-auto relative z-10">
           <motion.div
             initial={{ opacity: 0, y: 8 }}

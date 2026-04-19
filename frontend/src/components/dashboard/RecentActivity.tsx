@@ -9,6 +9,8 @@ import {
   Clock,
 } from "lucide-react";
 import type { VMEnriched } from "@/api/vms";
+import SpotlightCard from "@/components/ui/SpotlightCard";
+import GlitchText from "@/components/ui/GlitchText";
 
 interface RecentActivityProps {
   vms?: VMEnriched[];
@@ -98,11 +100,11 @@ export default function RecentActivity({ vms }: RecentActivityProps) {
   const activities = vms ? deriveActivities(vms) : [];
 
   return (
-    <motion.div
+    <SpotlightCard
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.25, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-      className="glass-panel rounded-[var(--radius-lg)] p-6 relative overflow-hidden"
+      className="p-6 relative overflow-hidden"
     >
       {/* Top accent line */}
       <div
@@ -114,12 +116,10 @@ export default function RecentActivity({ vms }: RecentActivityProps) {
 
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
-        <h2
-          className="text-sm font-bold tracking-wide text-primary"
-          style={{ fontFamily: "var(--font-display)" }}
-        >
-          Recent Activity
-        </h2>
+        <GlitchText
+          text="Recent Activity"
+          className="text-base font-bold tracking-wide text-primary"
+        />
         <Clock className="h-3.5 w-3.5 text-muted" />
       </div>
 
@@ -144,7 +144,7 @@ export default function RecentActivity({ vms }: RecentActivityProps) {
                   duration: 0.35,
                   ease: [0.16, 1, 0.3, 1],
                 }}
-                className="relative flex items-start gap-3 py-2 pl-0"
+                className="relative flex items-start gap-3 px-3 py-2 -ml-3 rounded-xl border border-transparent hover:border-border-subtle/30 hover:bg-surface/50 hover:shadow-lg transition-all duration-300"
               >
                 {/* Timeline dot */}
                 <div
@@ -173,6 +173,6 @@ export default function RecentActivity({ vms }: RecentActivityProps) {
           </div>
         </div>
       )}
-    </motion.div>
+    </SpotlightCard>
   );
 }

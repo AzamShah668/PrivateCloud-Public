@@ -1,5 +1,21 @@
 import { motion } from "motion/react";
 import { useState, useEffect } from "react";
+import GlitchText from "@/components/ui/GlitchText";
+
+const CSS_ANIMATIONS = `
+@keyframes radar-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@keyframes radar-spin-reverse {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(-360deg); }
+}
+@keyframes dash-flow {
+  from { stroke-dashoffset: 100; }
+  to { stroke-dashoffset: 0; }
+}
+`;
 
 interface ClusterHealthProps {
   totalVMs: number;
@@ -8,13 +24,13 @@ interface ClusterHealthProps {
 }
 
 const NODES = [
-  { id: "core", x: 250, y: 150, r: 28, label: "Core", type: "primary" as const },
-  { id: "n1", x: 100, y: 70, r: 18, label: "Node 1", type: "compute" as const },
-  { id: "n2", x: 400, y: 70, r: 18, label: "Node 2", type: "compute" as const },
-  { id: "n3", x: 70, y: 220, r: 16, label: "Storage", type: "storage" as const },
-  { id: "n4", x: 430, y: 220, r: 16, label: "Backup", type: "storage" as const },
-  { id: "n5", x: 180, y: 270, r: 14, label: "Net GW", type: "network" as const },
-  { id: "n6", x: 320, y: 270, r: 14, label: "DNS", type: "network" as const },
+  { id: "core", x: 250, y: 150, r: 28, label: "Core Router", metric: "99.99% UP", type: "primary" as const },
+  { id: "n1", x: 90, y: 60, r: 18, label: "Compute Alpha", metric: "CPU 42%", type: "compute" as const },
+  { id: "n2", x: 410, y: 60, r: 18, label: "Compute Beta", metric: "CPU 68%", type: "compute" as const },
+  { id: "n3", x: 60, y: 220, r: 16, label: "SAN Storage", metric: "45/100 TB", type: "storage" as const },
+  { id: "n4", x: 440, y: 220, r: 16, label: "Tape Backup", metric: "Active", type: "storage" as const },
+  { id: "n5", x: 170, y: 270, r: 14, label: "Net GW-1", metric: "1.2 Gbps", type: "network" as const },
+  { id: "n6", x: 330, y: 270, r: 14, label: "DNS Root", metric: "12ms ping", type: "network" as const },
 ];
 
 const CONNECTIONS = [
@@ -30,22 +46,23 @@ const NODE_COLORS = {
   network: { fill: "#14B8A6", stroke: "#14B8A6", glow: "rgba(20,184,166,0.25)" },
 };
 
-function DataPacket({ x1, y1, x2, y2, delay }: { x1: number; y1: number; x2: number; y2: number; delay: number }) {
+function DataPacket({ x1, y1, x2, y2, delay, color }: { x1: number; y1: number; x2: number; y2: number; delay: number; color: string }) {
   return (
     <motion.circle
-      r="2.5"
-      fill="#0AEFFF"
-      initial={{ cx: x1, cy: y1, opacity: 0 }}
+      r="3"
+      cx="0" cy="0"
+      fill={color}
+      initial={{ x: x1, y: y1, opacity: 0 }}
       animate={{
-        cx: [x1, x2],
-        cy: [y1, y2],
+        x: [x1, x2],
+        y: [y1, y2],
         opacity: [0, 1, 1, 0],
       }}
       transition={{
-        duration: 2.5,
+        duration: 1.8 + Math.random() * 1.5,
         delay,
         repeat: Infinity,
-        repeatDelay: 3 + Math.random() * 4,
+        repeatDelay: 1 + Math.random() * 3,
         ease: "easeInOut",
       }}
     />
@@ -69,16 +86,19 @@ export default function AdminClusterHealth(_props: ClusterHealthProps) {
       transition={{ delay: 0.15, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
       className="glass-panel rounded-[var(--radius-lg)] p-6 relative overflow-hidden group"
     >
-      {/* ── Box Video Background ─────────────────────── */}
-      <video
-        autoPlay
-        loop
-        muted
-        playsInline
-        className="absolute inset-0 w-full h-full object-cover opacity-30 pointer-events-none z-0 mix-blend-screen transition-opacity duration-700 group-hover:opacity-50"
-        src="/admin-box-bg.mp4"
+      {/* ── Box CSS Grid Background ─────────────────────── */}
+      <div 
+        className="absolute inset-0 pointer-events-none z-0 opacity-30 transition-opacity duration-700 group-hover:opacity-50" 
+        style={{
+          backgroundImage: `linear-gradient(rgba(10,239,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(10,239,255,0.1) 1px, transparent 1px)`,
+          backgroundSize: '24px 24px',
+          backgroundPosition: 'center center'
+        }} 
       />
-      <div className="absolute inset-0 bg-deepest/60 z-0 pointer-events-none" />
+      {/* Radial vignette to fade edges */}
+      <div className="absolute inset-0 pointer-events-none z-0" style={{ background: 'radial-gradient(circle at center, transparent 30%, var(--color-deepest) 90%)' }} />
+      <div className="absolute inset-0 bg-deepest/70 z-0 pointer-events-none" />
+      <style>{CSS_ANIMATIONS}</style>
 
       {/* Main Content Layer */}
       <div className="relative z-10">
@@ -92,12 +112,10 @@ export default function AdminClusterHealth(_props: ClusterHealthProps) {
 
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
-          <h2
+          <GlitchText
+            text="Cluster Health"
             className="text-base font-bold uppercase tracking-[0.15em] text-primary"
-            style={{ fontFamily: "var(--font-display)" }}
-          >
-            Cluster Health
-          </h2>
+          />
         <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-[var(--radius-sm)] border border-accent-green/20 bg-accent-green/5">
           <span className="relative flex h-2 w-2">
             <span className="absolute inset-0 rounded-full bg-accent-green animate-pulse-status" />
@@ -111,7 +129,7 @@ export default function AdminClusterHealth(_props: ClusterHealthProps) {
 
         {/* SVG Network Topology */}
         <div className="relative mt-4">
-          <svg viewBox="0 0 500 310" className="w-full h-auto" style={{ maxHeight: 380 }}>
+          <svg viewBox="0 0 500 340" className="w-full h-auto" style={{ maxHeight: 380 }}>
           {/* Connection lines */}
           {CONNECTIONS.map(([from, to], i) => {
             const a = nodeMap[from as string];
@@ -121,14 +139,22 @@ export default function AdminClusterHealth(_props: ClusterHealthProps) {
               <g key={`conn-${i}`}>
                 <line
                   x1={a.x} y1={a.y} x2={b.x} y2={b.y}
-                  stroke="rgba(10,239,255,0.12)"
-                  strokeWidth="1"
-                  strokeDasharray="4 3"
+                  stroke="rgba(10,239,255,0.2)"
+                  strokeWidth="1.5"
+                  strokeDasharray="6 4"
+                  style={{ animation: 'dash-flow 5s linear infinite' }}
                 />
-                {i < 4 && (
+                {/* Multiple data packets for more activity */}
+                <DataPacket
+                  x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+                  delay={i * 0.5}
+                  color={NODE_COLORS[b.type].fill}
+                />
+                {(i % 2 === 0) && (
                   <DataPacket
-                    x1={a.x} y1={a.y} x2={b.x} y2={b.y}
-                    delay={i * 1.2}
+                    x1={b.x} y1={b.y} x2={a.x} y2={a.y}
+                    delay={i * 0.7 + 1.2}
+                    color={NODE_COLORS[a.type].fill}
                   />
                 )}
               </g>
@@ -164,14 +190,28 @@ export default function AdminClusterHealth(_props: ClusterHealthProps) {
                 {/* Label */}
                 <text
                   x={node.x}
-                  y={node.y + node.r + 14}
+                  y={node.y + node.r + 16}
                   textAnchor="middle"
                   fill="var(--color-secondary)"
                   fontSize="12"
                   fontWeight="600"
-                  fontFamily="var(--font-mono)"
+                  fontFamily="var(--font-display)"
+                  className="tracking-wider"
                 >
                   {node.label}
+                </text>
+                {/* Metric */}
+                <text
+                  x={node.x}
+                  y={node.y + node.r + 28}
+                  textAnchor="middle"
+                  fill={colors.fill}
+                  fontSize="9"
+                  fontWeight="bold"
+                  fontFamily="var(--font-mono)"
+                  className="opacity-80"
+                >
+                  [{node.metric}]
                 </text>
               </g>
             );
@@ -179,18 +219,28 @@ export default function AdminClusterHealth(_props: ClusterHealthProps) {
 
           {/* Radar sweep on core */}
           <circle
-            cx={250} cy={150} r={60}
+            cx={250} cy={150} r={45}
             fill="none"
-            stroke="rgba(10,239,255,0.06)"
-            strokeWidth="1"
+            stroke="#0AEFFF"
+            strokeWidth="0.5"
             strokeDasharray="4 4"
+            opacity="0.3"
+            style={{ transformOrigin: "250px 150px", animation: "radar-spin 15s linear infinite" }}
           />
           <circle
-            cx={250} cy={150} r={100}
+            cx={250} cy={150} r={75}
             fill="none"
-            stroke="rgba(10,239,255,0.03)"
+            stroke="#F59E0B"
             strokeWidth="0.5"
-            strokeDasharray="3 5"
+            strokeDasharray="10 10"
+            opacity="0.2"
+            style={{ transformOrigin: "250px 150px", animation: "radar-spin-reverse 25s linear infinite" }}
+          />
+          <circle
+            cx={250} cy={150} r={105}
+            fill="none"
+            stroke="rgba(10,239,255,0.05)"
+            strokeWidth="1"
           />
         </svg>
         </div>

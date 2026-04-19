@@ -9,6 +9,7 @@ import {
   Tooltip,
 } from "recharts";
 import { MoreHorizontal } from "lucide-react";
+import GlitchText from "@/components/ui/GlitchText";
 
 interface DataPoint {
   time: string;
@@ -155,12 +156,10 @@ export default function AdminLiveCharts() {
         />
 
         <div className="flex items-center justify-between mb-6">
-          <h2
+          <GlitchText
+            text="Cluster Resources"
             className="text-base font-bold uppercase tracking-[0.15em] text-primary"
-            style={{ fontFamily: "var(--font-display)" }}
-          >
-            Cluster Resources
-          </h2>
+          />
         <button className="p-1 rounded-[var(--radius-sm)] text-muted hover:text-primary hover:bg-elevated transition-colors cursor-pointer">
           <MoreHorizontal className="h-4 w-4" />
         </button>

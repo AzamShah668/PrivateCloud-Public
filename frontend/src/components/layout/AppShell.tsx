@@ -3,6 +3,7 @@ import { motion } from "motion/react";
 import { Wifi, Menu } from "lucide-react";
 import Sidebar from "./Sidebar";
 import BackgroundEffects from "./BackgroundEffects";
+import Background3D from "./Background3D";
 import { useAuthStore } from "@/stores/auth-store";
 import { useState, useEffect } from "react";
 
@@ -20,7 +21,7 @@ function TopBar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
       initial={{ opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-      className="flex items-center justify-between px-6 h-14 border-b border-border-subtle bg-surface/40 backdrop-blur-md shrink-0"
+      className="flex items-center justify-between px-6 h-14 border-b border-border-subtle bg-surface/40 backdrop-blur-md shrink-0 z-20"
     >
       {/* Left: Hamburger + Welcome */}
       <div className="flex items-center gap-4">
@@ -32,7 +33,7 @@ function TopBar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
         </button>
         <span className="text-base text-secondary" style={{ fontFamily: "var(--font-body)" }}>
           Welcome back,{" "}
-          <span className="text-primary font-semibold">
+          <span className="text-primary font-semibold text-glow-magenta transition-colors">
             {user?.username ?? "User"}
           </span>
         </span>
@@ -40,20 +41,20 @@ function TopBar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
 
       {/* Right: Status + Time */}
       <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2 px-3 py-1 rounded-[var(--radius-sm)] border border-border-subtle bg-elevated/30">
+        <div className="flex items-center gap-2 px-3 py-1 rounded-[var(--radius-sm)] border border-border-subtle bg-elevated/30 glow-border-hover transition-colors">
           <span className="text-xs text-secondary uppercase tracking-wider" style={{ fontFamily: "var(--font-display)" }}>
             Status:
           </span>
-          <span className="text-xs font-mono font-semibold text-accent-green flex items-center gap-1.5">
+          <span className="text-xs font-mono font-semibold text-accent-cyan flex items-center gap-1.5 text-glow-cyan">
             Online
             <span className="relative flex h-2 w-2">
-              <span className="absolute inset-0 rounded-full bg-accent-green animate-pulse-status" />
-              <span className="relative h-2 w-2 rounded-full bg-accent-green" />
+              <span className="absolute inset-0 rounded-full bg-accent-cyan animate-pulse-status" />
+              <span className="relative h-2 w-2 rounded-full bg-accent-cyan" />
             </span>
           </span>
         </div>
         <div className="flex items-center gap-1.5 text-xs text-muted font-mono">
-          <Wifi className="h-3 w-3 text-accent-green" />
+          <Wifi className="h-3 w-3 text-accent-cyan" />
           <span>{time.toLocaleTimeString("en-US", { hour12: false })}</span>
         </div>
       </div>
@@ -68,6 +69,7 @@ export default function AppShell() {
     <div className="flex h-dvh bg-deepest overflow-hidden">
       {/* Background effects layer */}
       <BackgroundEffects />
+      <Background3D />
 
       <Sidebar isOpen={isSidebarOpen} />
       <div className="flex-1 flex flex-col overflow-hidden relative">

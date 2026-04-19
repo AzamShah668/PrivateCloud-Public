@@ -2,6 +2,7 @@ import { motion } from "motion/react";
 import { Activity, Server, User, Shield, Trash2, Play, Square, RotateCcw, Plus } from "lucide-react";
 import type { AuditLog, VMJobAdmin } from "@/api/admin";
 import { cn } from "@/lib/cn";
+import GlitchText from "@/components/ui/GlitchText";
 
 interface AdminRecentActivityProps {
   logs: AuditLog[];
@@ -82,12 +83,10 @@ export default function AdminRecentActivity({ logs, vms }: AdminRecentActivityPr
           />
 
           <div className="flex items-center justify-between mb-6">
-            <h2
+            <GlitchText
+              text="Recent Activity"
               className="text-base font-bold uppercase tracking-[0.15em] text-primary"
-              style={{ fontFamily: "var(--font-display)" }}
-            >
-              Recent Activity
-            </h2>
+            />
             <span className="text-xs text-muted font-mono">
             {logs.length} events
           </span>
@@ -104,12 +103,15 @@ export default function AdminRecentActivity({ logs, vms }: AdminRecentActivityPr
                 duration: 0.35,
                 ease: [0.16, 1, 0.3, 1],
               }}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-[var(--radius-md)] hover:bg-elevated/30 transition-colors group"
+              className="flex items-center gap-3 px-3 py-2.5 rounded-[var(--radius-md)] border border-transparent hover:border-accent-cyan/20 hover:bg-elevated/40 transition-all duration-300 hover:shadow-[0_0_15px_rgba(10,239,255,0.05)] group relative"
             >
-              <span className={cn("opacity-60", ACTION_COLORS[log.action] ?? "text-muted")}>
+              {/* Hover glow */}
+              <div className="absolute inset-0 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-500 rounded-[var(--radius-md)] bg-gradient-to-r from-accent-cyan/5 to-transparent" />
+              
+              <span className={cn("opacity-60 relative z-10", ACTION_COLORS[log.action] ?? "text-muted")}>
                 {ACTION_ICONS[log.action] ?? <Activity className="h-3.5 w-3.5" />}
               </span>
-              <div className="flex-1 min-w-0">
+              <div className="flex-1 min-w-0 relative z-10">
                 <span className="text-sm text-primary font-medium">
                   {log.action}
                 </span>
@@ -160,12 +162,10 @@ export default function AdminRecentActivity({ logs, vms }: AdminRecentActivityPr
           />
 
           <div className="flex items-center justify-between mb-6">
-            <h2
+            <GlitchText
+              text="Recent Deployments"
               className="text-base font-bold uppercase tracking-[0.15em] text-primary"
-              style={{ fontFamily: "var(--font-display)" }}
-            >
-              Recent Deployments
-            </h2>
+            />
             <span className="text-xs text-muted font-mono">
             {vms.length} total
           </span>
@@ -182,10 +182,13 @@ export default function AdminRecentActivity({ logs, vms }: AdminRecentActivityPr
                 duration: 0.35,
                 ease: [0.16, 1, 0.3, 1],
               }}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-[var(--radius-md)] hover:bg-elevated/30 transition-colors"
+              className="flex items-center gap-3 px-3 py-2.5 rounded-[var(--radius-md)] border border-transparent hover:border-accent-amber/20 hover:bg-elevated/40 transition-all duration-300 hover:shadow-[0_0_15px_rgba(245,158,11,0.05)] group relative"
             >
-              <Server className="h-3.5 w-3.5 text-accent-blue/60" />
-              <div className="flex-1 min-w-0">
+              {/* Hover glow */}
+              <div className="absolute inset-0 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-500 rounded-[var(--radius-md)] bg-gradient-to-r from-accent-amber/5 to-transparent" />
+              
+              <Server className="h-3.5 w-3.5 text-accent-blue/60 group-hover:text-accent-amber/80 transition-colors relative z-10" />
+              <div className="flex-1 min-w-0 relative z-10">
                 <p className="text-sm text-primary font-medium truncate">
                   {vm.vm_name}
                 </p>

@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useAdminAuditLogs } from "@/hooks/use-admin";
 import { cn } from "@/lib/cn";
+import GlitchText from "@/components/ui/GlitchText";
 
 const ACTION_ICONS: Record<string, React.ReactNode> = {
   "vm.create": <Plus className="h-3.5 w-3.5" />,
@@ -70,12 +71,10 @@ export default function AdminAuditLogsPage() {
         className="flex items-center justify-between"
       >
         <div>
-          <h1
+          <GlitchText
+            text="Audit Logs"
             className="text-2xl font-bold text-primary tracking-tight"
-            style={{ fontFamily: "var(--font-display)" }}
-          >
-            Audit Logs
-          </h1>
+          />
           <p
             className="text-sm text-muted mt-1"
             style={{ fontFamily: "var(--font-body)" }}
@@ -164,7 +163,7 @@ export default function AdminAuditLogsPage() {
                     duration: 0.3,
                     ease: [0.16, 1, 0.3, 1],
                   }}
-                  className="border-b border-border-subtle/50 hover:bg-elevated/20 transition-colors"
+                  className="border-b border-border-subtle/50 hover:bg-elevated/40 hover:shadow-[inset_0_0_15px_rgba(10,239,255,0.03)] transition-all duration-300 group"
                 >
                   <td className="px-4 py-3 w-8">
                     <span

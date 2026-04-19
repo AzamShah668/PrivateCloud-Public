@@ -21,13 +21,13 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
             {label}
           </label>
         )}
-        <input
+          <input
           ref={ref}
           id={inputId}
           className={cn(
             "h-11 w-full rounded-[var(--radius-md)] px-4",
             "bg-input border border-border-subtle",
-            "text-sm text-primary placeholder:text-muted/60",
+            "text-sm text-primary placeholder:text-primary/50",
             "outline-none transition-all duration-300",
             "focus:border-accent-cyan/50 focus:shadow-[0_0_0_3px_rgba(10,239,255,0.08),0_0_15px_rgba(10,239,255,0.05)]",
             "font-mono",

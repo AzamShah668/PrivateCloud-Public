@@ -47,7 +47,7 @@ export default function CreateVMForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-8 max-w-3xl">
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-8 max-w-3xl relative z-20">
       {/* VM Name */}
       <motion.div
         initial={{ opacity: 0, y: 16 }}

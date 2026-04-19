@@ -1,5 +1,6 @@
 import { motion } from "motion/react";
 import { Construction } from "lucide-react";
+import GlitchText from "@/components/ui/GlitchText";
 
 export default function AdminSettingsPage() {
   return (
@@ -20,12 +21,10 @@ export default function AdminSettingsPage() {
         >
           <Construction className="h-7 w-7 text-accent-amber" />
         </div>
-        <h2
+        <GlitchText
+          text="Settings Coming Soon"
           className="text-lg font-bold text-primary mb-2"
-          style={{ fontFamily: "var(--font-display)" }}
-        >
-          Settings Coming Soon
-        </h2>
+        />
         <p
           className="text-sm text-muted leading-relaxed"
           style={{ fontFamily: "var(--font-body)" }}

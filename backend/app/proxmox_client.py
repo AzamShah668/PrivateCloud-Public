@@ -81,7 +81,7 @@ class ProxmoxClient:
 
     def __init__(self):
         self.host         = os.getenv("PROXMOX_HOST",     "192.168.1.100")
-        self.default_node = os.getenv("PROXMOX_NODE",     "pve")
+        self.default_node = os.getenv("PROXMOX_NODE",     "home")
 
         # ── Auth method selection ────────────────────────────────────────
         # If PROXMOX_TOKEN_ID is set → use API token auth (preferred).

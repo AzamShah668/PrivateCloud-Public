@@ -175,7 +175,10 @@ def login(
         401 Unauthorized — wrong username or password.
     """
     # ── Step 1: find the user ─────────────────────────────────────────────
-    user_dict = database.get_user_by_username(form_data.username)
+    # Normalise to lowercase — registration lowercases via the UserCreate
+    # validator, so we must do the same here to match.
+    username = form_data.username.strip().lower()
+    user_dict = database.get_user_by_username(username)
 
     # ── Step 2: verify password ───────────────────────────────────────────
     # IMPORTANT: we check both user existence AND password in one condition.

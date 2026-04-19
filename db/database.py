@@ -460,3 +460,98 @@ def list_audit_logs(limit: int = 100) -> list[dict]:
                 (limit,),
             )
             return cur.fetchall()
+
+
+# ---------------------------------------------------------------------------
+# Admin helpers
+# ---------------------------------------------------------------------------
+
+def list_all_users(limit: int = 200) -> list[dict]:
+    """Return all users (newest first), excluding password_hash. Admin use only."""
+    with _conn() as conn:
+        with _dict_cursor(conn) as cur:
+            cur.execute(
+                """
+                SELECT id, username, role, daily_quota, created_at
+                FROM users
+                ORDER BY id DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            return cur.fetchall()
+
+
+def list_all_vm_jobs(limit: int = 200) -> list[dict]:
+    """Return all VM jobs across all users (newest first). Admin use only."""
+    with _conn() as conn:
+        with _dict_cursor(conn) as cur:
+            cur.execute(
+                """
+                SELECT vj.*, u.username AS owner_username
+                FROM vm_jobs vj
+                JOIN users u ON u.id = vj.user_id
+                ORDER BY vj.id DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            return cur.fetchall()
+
+
+def get_admin_stats() -> dict:
+    """
+    Return aggregate statistics for the admin dashboard.
+    All counts come from existing tables — no new schema required.
+    """
+    with _conn() as conn:
+        with _dict_cursor(conn) as cur:
+            cur.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM users)                               AS total_users,
+                    (SELECT COUNT(*) FROM users WHERE role = 'admin')          AS total_admins,
+                    (SELECT COUNT(*) FROM vm_jobs)                              AS total_vms,
+                    (SELECT COUNT(*) FROM vm_jobs WHERE status = 'done')        AS active_vms,
+                    (SELECT COUNT(*) FROM vm_jobs WHERE status = 'failed')      AS failed_vms,
+                    (SELECT COUNT(*) FROM vm_jobs WHERE status = 'queued')      AS queued_vms,
+                    (SELECT COUNT(*) FROM vm_jobs WHERE status = 'deleted')     AS deleted_vms,
+                    (SELECT COUNT(*) FROM audit_logs)                           AS total_audit_entries,
+                    (SELECT COUNT(*)
+                     FROM vm_jobs
+                     WHERE created_at::date = CURRENT_DATE)                    AS vms_created_today
+                """
+            )
+            return cur.fetchone()
+
+
+def update_user_role(user_id: int, role: str) -> dict | None:
+    """Update a user's role and return the updated user (without password_hash)."""
+    with _conn() as conn:
+        with _dict_cursor(conn) as cur:
+            cur.execute(
+                """
+                UPDATE users SET role = %s WHERE id = %s
+                RETURNING id, username, role, daily_quota, created_at
+                """,
+                (role, user_id),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return row
+
+
+def update_user_quota(user_id: int, daily_quota: int) -> dict | None:
+    """Update a user's daily VM quota and return the updated user."""
+    with _conn() as conn:
+        with _dict_cursor(conn) as cur:
+            cur.execute(
+                """
+                UPDATE users SET daily_quota = %s WHERE id = %s
+                RETURNING id, username, role, daily_quota, created_at
+                """,
+                (daily_quota, user_id),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return row

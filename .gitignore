@@ -26,6 +26,11 @@ env/
 **/venv/
 **/.venv/
 
+# ── Node / Frontend ─────────────────────────────────────────────────────────
+node_modules/
+**/node_modules/
+frontend/dist/
+
 # ── Docker ───────────────────────────────────────────────────────────────────
 # Docker volumes / data directories created at runtime
 postgres_data/
@@ -51,3 +56,13 @@ CLAUDE.md
 .DS_Store
 Thumbs.db
 Desktop.ini
+*vecteezy*.mov
+*vecteezy*.mp4
+
+# ── Local debug / repair scripts (Windows host troubleshooting) ─────────────
+extract_log.ps1
+list_drives.ps1
+repair_*.ps1
+repair_log*.txt
+status.txt
+status_check.ps1

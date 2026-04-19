@@ -34,7 +34,7 @@ CPU_CORES=2
 # Default credentials baked into the golden image via cloud-init.
 # These must match VM_DEFAULT_USERNAME and VM_DEFAULT_PASSWORD in your .env
 DEFAULT_USER="ubuntu"
-DEFAULT_PASSWORD="PrivateCloud@2024"   # ← CHANGE THIS to your preferred password
+DEFAULT_PASSWORD="verventech123"   # ← must match VM_DEFAULT_PASSWORD in .env
 
 # Ubuntu 24.04 LTS cloud image
 CLOUD_IMAGE_URL="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"

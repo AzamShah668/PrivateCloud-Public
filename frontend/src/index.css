@@ -1,0 +1,503 @@
+@import "tailwindcss";
+@import "@fontsource-variable/space-grotesk";
+@import "@fontsource-variable/dm-sans";
+@import "@fontsource-variable/inter";
+@import "@fontsource/geist-mono";
+
+/* ═══════════════════════════════════════════════════════════════
+   Design Tokens — "azna-cloud" Private Cloud Dashboard
+   Fonts: Space Grotesk (display) + DM Sans (body) + Geist Mono
+   ═══════════════════════════════════════════════════════════════ */
+
+@theme {
+  /* ── Backgrounds ─────────────────────────────────────── */
+  --color-deepest: #060B14;
+  --color-surface: #0A1628;
+  --color-elevated: #0F1D32;
+  --color-input: #111F36;
+
+  /* ── Borders ─────────────────────────────────────────── */
+  --color-border-subtle: #1A2A44;
+  --color-border-focus: #0AEFFF;
+
+  /* ── Text ────────────────────────────────────────────── */
+  --color-primary: #E2E8F0;
+  --color-secondary: #7A8BA8;
+  --color-muted: #3E5068;
+
+  /* ── Accent ──────────────────────────────────────────── */
+  --color-accent-blue: #3B82F6;
+  --color-accent-blue-glow: #3B82F620;
+  --color-accent-cyan: #0AEFFF;
+  --color-accent-cyan-glow: #0AEFFF20;
+  --color-accent-magenta: #D946EF;
+  --color-accent-magenta-glow: #D946EF20;
+  --color-accent-purple: #A855F7;
+  --color-accent-teal: #14B8A6;
+  --color-accent-green: #10B981;
+  --color-accent-amber: #F59E0B;
+  --color-accent-red: #EF4444;
+  --color-accent-violet: #8B5CF6;
+  --color-accent-orange: #FF6B35;
+
+  /* ── Typography ──────────────────────────────────────── */
+  --font-display: "Space Grotesk Variable", "Space Grotesk", sans-serif;
+  --font-body: "DM Sans Variable", "DM Sans", system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
+
+  /* ── Animation ───────────────────────────────────────── */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out-quad: cubic-bezier(0.45, 0, 0.55, 1);
+
+  /* ── Radii ───────────────────────────────────────────── */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Base Resets
+   ═══════════════════════════════════════════════════════════════ */
+
+html {
+  font-family: var(--font-body);
+  color: var(--color-primary);
+  background: var(--color-deepest);
+  scrollbar-gutter: stable;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+}
+
+/* ── Custom scrollbar ──────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-subtle);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted);
+}
+
+/* ── Focus ring ─────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+/* ── Selection ──────────────────────────────────────── */
+::selection {
+  background: var(--color-accent-cyan);
+  color: #060B14;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Keyframe Animations
+   ═══════════════════════════════════════════════════════════════ */
+
+@keyframes pulse-status {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.5); opacity: 0.4; }
+}
+
+@keyframes scan-light {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 10px rgba(10, 239, 255, 0.1), 0 0 20px rgba(10, 239, 255, 0.05); }
+  50% { box-shadow: 0 0 15px rgba(10, 239, 255, 0.2), 0 0 30px rgba(10, 239, 255, 0.1); }
+}
+
+@keyframes float-particle {
+  0%, 100% { transform: translateY(0) translateX(0); opacity: 0.3; }
+  25% { transform: translateY(-10px) translateX(5px); opacity: 0.6; }
+  50% { transform: translateY(-5px) translateX(-3px); opacity: 0.4; }
+  75% { transform: translateY(-15px) translateX(2px); opacity: 0.5; }
+}
+
+@keyframes grid-scan {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+
+@keyframes data-stream {
+  0% { stroke-dashoffset: 100; opacity: 0; }
+  20% { opacity: 1; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+
+@keyframes border-glow {
+  0%, 100% { border-color: rgba(10, 239, 255, 0.15); }
+  50% { border-color: rgba(10, 239, 255, 0.35); }
+}
+
+@keyframes node-pulse {
+  0%, 100% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(1.15); filter: brightness(1.3); }
+}
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes counter-roll {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes radar-sweep {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes ripple {
+  0% { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+
+@keyframes glitch-anim {
+  0% {
+    clip-path: inset(40% 0 61% 0);
+    transform: translate(-2px, 2px);
+  }
+  20% {
+    clip-path: inset(92% 0 1% 0);
+    transform: translate(2px, -2px);
+  }
+  40% {
+    clip-path: inset(43% 0 1% 0);
+    transform: translate(-2px, 2px);
+  }
+  60% {
+    clip-path: inset(25% 0 58% 0);
+    transform: translate(2px, -2px);
+  }
+  80% {
+    clip-path: inset(54% 0 7% 0);
+    transform: translate(-2px, 2px);
+  }
+  100% {
+    clip-path: inset(58% 0 43% 0);
+    transform: translate(2px, -2px);
+  }
+}
+
+/* ── Button Glow Animations ─────────────────────────── */
+@keyframes btn-glow-up {
+  0% { box-shadow: 0 0 8px rgba(10, 239, 255, 0.15), 0 0 16px rgba(10, 239, 255, 0.05); }
+  100% { box-shadow: 0 0 20px rgba(10, 239, 255, 0.35), 0 0 40px rgba(10, 239, 255, 0.15), 0 0 60px rgba(59, 130, 246, 0.1); }
+}
+
+@keyframes btn-glow-click {
+  0% { box-shadow: 0 0 30px rgba(10, 239, 255, 0.5), 0 0 60px rgba(10, 239, 255, 0.25); filter: brightness(1.2); }
+  100% { box-shadow: 0 0 15px rgba(10, 239, 255, 0.25), 0 0 30px rgba(10, 239, 255, 0.1); filter: brightness(1); }
+}
+
+@keyframes btn-glow-down {
+  0% { box-shadow: 0 0 20px rgba(10, 239, 255, 0.35), 0 0 40px rgba(10, 239, 255, 0.15); }
+  100% { box-shadow: 0 0 8px rgba(10, 239, 255, 0.1), 0 0 16px rgba(10, 239, 255, 0.03); }
+}
+
+/* ── Floating Particles ─────────────────────────────── */
+@keyframes particle-drift-1 {
+  0% { transform: translate(0, 0) scale(1); opacity: 0; }
+  10% { opacity: 0.4; }
+  50% { transform: translate(120px, -180px) scale(0.6); opacity: 0.2; }
+  90% { opacity: 0.3; }
+  100% { transform: translate(-80px, -360px) scale(0.8); opacity: 0; }
+}
+
+@keyframes particle-drift-2 {
+  0% { transform: translate(0, 0) scale(0.8); opacity: 0; }
+  15% { opacity: 0.3; }
+  60% { transform: translate(-150px, -220px) scale(1.1); opacity: 0.15; }
+  100% { transform: translate(60px, -400px) scale(0.5); opacity: 0; }
+}
+
+@keyframes particle-drift-3 {
+  0% { transform: translate(0, 0); opacity: 0; }
+  20% { opacity: 0.25; }
+  70% { transform: translate(90px, -280px); opacity: 0.1; }
+  100% { transform: translate(-40px, -500px); opacity: 0; }
+}
+
+/* ── Cloud Drift ────────────────────────────────────── */
+@keyframes cloud-drift-1 {
+  0% { transform: translateX(-20%) translateY(0) scale(1); opacity: 0.025; }
+  50% { transform: translateX(10%) translateY(-8px) scale(1.02); opacity: 0.04; }
+  100% { transform: translateX(-20%) translateY(0) scale(1); opacity: 0.025; }
+}
+
+@keyframes cloud-drift-2 {
+  0% { transform: translateX(15%) translateY(0) scale(0.9); opacity: 0.02; }
+  50% { transform: translateX(-10%) translateY(10px) scale(0.92); opacity: 0.035; }
+  100% { transform: translateX(15%) translateY(0) scale(0.9); opacity: 0.02; }
+}
+
+@keyframes cloud-drift-3 {
+  0% { transform: translateX(5%) translateY(5px) scale(1.05); opacity: 0.03; }
+  50% { transform: translateX(-15%) translateY(-5px) scale(1.08); opacity: 0.045; }
+  100% { transform: translateX(5%) translateY(5px) scale(1.05); opacity: 0.03; }
+}
+
+/* ── Gradient Orbs ──────────────────────────────────── */
+@keyframes orb-float-1 {
+  0% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(40px, -30px) scale(1.1); }
+  66% { transform: translate(-20px, 20px) scale(0.95); }
+  100% { transform: translate(0, 0) scale(1); }
+}
+
+@keyframes orb-float-2 {
+  0% { transform: translate(0, 0) scale(0.9); }
+  33% { transform: translate(-50px, 40px) scale(1.05); }
+  66% { transform: translate(30px, -20px) scale(0.85); }
+  100% { transform: translate(0, 0) scale(0.9); }
+}
+
+@keyframes orb-float-3 {
+  0% { transform: translate(0, 0) scale(1.05); }
+  50% { transform: translate(60px, 30px) scale(0.95); }
+  100% { transform: translate(0, 0) scale(1.05); }
+}
+
+/* ── Line Sweep ─────────────────────────────────────── */
+@keyframes line-sweep {
+  0% { transform: translateY(-100%) rotate(-2deg); opacity: 0; }
+  10% { opacity: 0.08; }
+  90% { opacity: 0.08; }
+  100% { transform: translateY(200%) rotate(-2deg); opacity: 0; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Animation Utility Classes
+   ═══════════════════════════════════════════════════════════════ */
+
+.animate-pulse-status { animation: pulse-status 2s ease-in-out infinite; }
+.animate-scan-light { animation: scan-light 4s ease-in-out infinite; }
+.animate-shimmer { background-size: 200% 100%; animation: shimmer 1.5s ease-in-out infinite; }
+.animate-fade-in-up { animation: fade-in-up 0.35s var(--ease-out-expo) both; }
+.animate-glow-pulse { animation: glow-pulse 3s ease-in-out infinite; }
+.animate-float-particle { animation: float-particle 4s ease-in-out infinite; }
+.animate-grid-scan { animation: grid-scan 8s linear infinite; }
+.animate-border-glow { animation: border-glow 3s ease-in-out infinite; }
+.animate-node-pulse { animation: node-pulse 2s ease-in-out infinite; }
+.animate-slide-in-right { animation: slide-in-right 0.4s var(--ease-out-expo) both; }
+.animate-counter-roll { animation: counter-roll 0.6s var(--ease-out-expo) both; }
+.animate-ripple { animation: ripple 2s ease-out infinite; }
+
+/* ═══════════════════════════════════════════════════════════════
+   Glassmorphism & Utility Classes
+   ═══════════════════════════════════════════════════════════════ */
+
+.glass-panel {
+  background: rgba(10, 22, 40, 0.6);
+  backdrop-filter: blur(16px) saturate(1.3);
+  border: 1px solid rgba(26, 42, 68, 0.6);
+  box-shadow: 
+    0 0 0 1px rgba(10, 239, 255, 0.03),
+    0 4px 24px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+.glass-panel-hover {
+  transition: all 0.3s ease;
+}
+.glass-panel-hover:hover {
+  border-color: rgba(10, 239, 255, 0.2);
+  box-shadow: 
+    0 0 0 1px rgba(10, 239, 255, 0.08),
+    0 8px 32px rgba(0, 0, 0, 0.5),
+    0 0 20px rgba(10, 239, 255, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.glow-border {
+  border: 1px solid rgba(10, 239, 255, 0.15);
+  box-shadow: 0 0 15px rgba(10, 239, 255, 0.05);
+}
+
+.glow-border-hover:hover {
+  border-color: rgba(10, 239, 255, 0.3);
+  box-shadow: 0 0 20px rgba(10, 239, 255, 0.1);
+}
+
+.grid-bg {
+  background-image: 
+    linear-gradient(rgba(10, 239, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(10, 239, 255, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.grid-bg-dense {
+  background-image: 
+    linear-gradient(rgba(10, 239, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(10, 239, 255, 0.04) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.text-glow-cyan {
+  text-shadow: 0 0 10px rgba(10, 239, 255, 0.4), 0 0 20px rgba(10, 239, 255, 0.2);
+}
+
+.text-glow-green {
+  text-shadow: 0 0 10px rgba(16, 185, 129, 0.4), 0 0 20px rgba(16, 185, 129, 0.2);
+}
+
+.text-glow-magenta {
+  text-shadow: 0 0 10px rgba(217, 70, 239, 0.4), 0 0 20px rgba(217, 70, 239, 0.2);
+}
+
+.text-gradient-cyber {
+  background: linear-gradient(135deg, var(--color-accent-cyan) 0%, var(--color-accent-blue) 50%, var(--color-accent-magenta) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Spotlight Card Base */
+.spotlight-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.spotlight-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(
+    800px circle at var(--mouse-x) var(--mouse-y),
+    rgba(10, 239, 255, 0.06),
+    transparent 40%
+  );
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.spotlight-card:hover::before {
+  opacity: 1;
+}
+
+/* Glitch Effect Classes */
+.glitch-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.glitch-text::before,
+.glitch-text::after {
+  content: attr(data-text);
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--color-deepest);
+}
+
+.glitch-text::before {
+  left: 2px;
+  text-shadow: -1px 0 var(--color-accent-magenta);
+  clip-path: inset(24% 0 53% 0);
+  animation: glitch-anim 2s infinite linear alternate-reverse;
+}
+
+.glitch-text::after {
+  left: -2px;
+  text-shadow: -1px 0 var(--color-accent-cyan);
+  clip-path: inset(62% 0 24% 0);
+  animation: glitch-anim 3s infinite linear alternate-reverse;
+}
+
+/* ── Button Glow Utility ────────────────────────────── */
+.btn-glow {
+  transition: box-shadow 0.3s ease, filter 0.2s ease, transform 0.15s ease;
+  box-shadow: 0 0 8px rgba(10, 239, 255, 0.1), 0 0 16px rgba(10, 239, 255, 0.03);
+}
+
+.btn-glow:hover {
+  animation: btn-glow-up 0.4s ease forwards;
+}
+
+.btn-glow:active {
+  animation: btn-glow-click 0.3s ease forwards;
+  transform: scale(0.97);
+}
+
+/* Secondary button glow (softer, blue-tinted) */
+.btn-glow-soft {
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.btn-glow-soft:hover {
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.2), 0 0 24px rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.btn-glow-soft:active {
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.35), 0 0 40px rgba(59, 130, 246, 0.15);
+}
+
+/* Ghost / nav item glow */
+.nav-glow:hover {
+  box-shadow: 0 0 8px rgba(10, 239, 255, 0.06), inset 0 0 12px rgba(10, 239, 255, 0.03);
+}
+
+/* ── Background Effect Layers ───────────────────────── */
+.bg-particle {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(circle, rgba(10, 239, 255, 0.6) 0%, transparent 70%);
+}
+
+.bg-orb {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  filter: blur(80px);
+}
+
+.bg-cloud {
+  position: absolute;
+  pointer-events: none;
+}
+
+/* Stagger animation delays */
+.stagger-1 { animation-delay: 0.05s; }
+.stagger-2 { animation-delay: 0.1s; }
+.stagger-3 { animation-delay: 0.15s; }
+.stagger-4 { animation-delay: 0.2s; }
+.stagger-5 { animation-delay: 0.25s; }
+.stagger-6 { animation-delay: 0.3s; }
+.stagger-7 { animation-delay: 0.35s; }
+.stagger-8 { animation-delay: 0.4s; }

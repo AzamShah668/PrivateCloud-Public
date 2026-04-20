@@ -9,6 +9,7 @@
 
 | # | Date | Title | Sprint | File |
 |---|------|-------|--------|------|
+| 014 | 2026-04-20 | Admin Portal DB Schema Extensions (I3: 4 additions) | 3 | [014-admin-db-schema-extensions.md](journal/014-admin-db-schema-extensions.md) |
 | 013 | 2026-04-19 | VM Detail Page: Provisioning State UX (fix 409 on Start) | 3 | [013-vm-provisioning-ux.md](journal/013-vm-provisioning-ux.md) |
 | 012 | 2026-04-15 | Code Review: Security & Quality Fixes (2C, 12H, 15M fixed) | 3 | [012-code-review-security-fixes.md](journal/012-code-review-security-fixes.md) |
 | 011 | 2026-04-15 | Admin Portal: Full-Stack Implementation | 3 | [011-admin-portal-fullstack.md](journal/011-admin-portal-fullstack.md) |

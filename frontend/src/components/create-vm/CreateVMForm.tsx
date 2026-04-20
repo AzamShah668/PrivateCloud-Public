@@ -29,7 +29,6 @@ export default function CreateVMForm() {
       cpu_cores: 2,
       ram_mb: 2048,
       storage_gb: 20,
-      node: "pve",
     },
   });
 

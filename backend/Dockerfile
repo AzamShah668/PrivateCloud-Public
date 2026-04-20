@@ -92,7 +92,7 @@ ENV PYTHONUNBUFFERED=1 \
     PROXMOX_HOST="" \
     PROXMOX_USER="root@pam" \
     PROXMOX_PASSWORD="" \
-    PROXMOX_NODE="pve" \
+    PROXMOX_NODE="home" \
     PROXMOX_VERIFY_SSL="false"
 
 # The port uvicorn listens on inside the container.

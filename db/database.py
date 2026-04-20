@@ -183,6 +183,118 @@ def init_db() -> None:
                 """
             )
 
+            # ----------------------------------------------------------
+            # I3 admin-portal schema extensions
+            # ----------------------------------------------------------
+            # Four non-breaking additions (see Proxmox_Admin_DB_Design.docx):
+            #   1. users.deleted_at + users.status  (soft-delete)
+            #   2. audit_logs.action_type           (controlled vocabulary)
+            #   3. audit_logs.target_user_id        (admin-action attribution)
+            #   4. system_settings                  (platform-wide key/value)
+            #
+            # PostgreSQL supports ADD COLUMN IF NOT EXISTS but NOT
+            # ADD CONSTRAINT IF NOT EXISTS — CHECK constraints are wrapped
+            # in DO $$ ... EXCEPTION WHEN duplicate_object blocks so the
+            # whole block stays idempotent.
+            # ----------------------------------------------------------
+
+            # --- users: soft-delete ---
+            cur.execute(
+                """
+                ALTER TABLE users
+                  ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ NULL,
+                  ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'active'
+                """
+            )
+            cur.execute(
+                """
+                DO $$ BEGIN
+                    ALTER TABLE users
+                        ADD CONSTRAINT users_status_check
+                        CHECK (status IN ('active', 'suspended', 'deleted'));
+                EXCEPTION WHEN duplicate_object THEN NULL;
+                END $$;
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_users_active
+                  ON users (id) WHERE status = 'active'
+                """
+            )
+
+            # --- audit_logs: action taxonomy ---
+            cur.execute(
+                """
+                ALTER TABLE audit_logs
+                  ADD COLUMN IF NOT EXISTS action_type VARCHAR(40)
+                        NOT NULL DEFAULT 'system.unknown'
+                """
+            )
+            cur.execute(
+                """
+                DO $$ BEGIN
+                    ALTER TABLE audit_logs
+                        ADD CONSTRAINT audit_action_type_check
+                        CHECK (action_type IN (
+                            'user.create','user.role_change','user.quota_change',
+                            'user.suspend','user.delete','user.reactivate',
+                            'vm.create','vm.delete','vm.status_change',
+                            'settings.change','admin.login','system.unknown'
+                        ));
+                EXCEPTION WHEN duplicate_object THEN NULL;
+                END $$;
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_audit_action_type
+                  ON audit_logs (action_type, created_at DESC)
+                """
+            )
+
+            # --- audit_logs: target user attribution ---
+            cur.execute(
+                """
+                ALTER TABLE audit_logs
+                  ADD COLUMN IF NOT EXISTS target_user_id INTEGER
+                        REFERENCES users(id) ON DELETE SET NULL
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_audit_target_user
+                  ON audit_logs (target_user_id, created_at DESC)
+                  WHERE target_user_id IS NOT NULL
+                """
+            )
+
+            # --- system_settings (NEW) ---
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS system_settings (
+                    key         VARCHAR(100) PRIMARY KEY,
+                    value       TEXT         NOT NULL,
+                    value_type  VARCHAR(10)  NOT NULL DEFAULT 'string',
+                    description TEXT,
+                    updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+                    updated_by  INTEGER      REFERENCES users(id) ON DELETE SET NULL,
+                    CONSTRAINT system_settings_type_check
+                        CHECK (value_type IN ('string','integer','boolean','json'))
+                )
+                """
+            )
+            cur.execute(
+                """
+                INSERT INTO system_settings (key, value, value_type, description) VALUES
+                    ('quota.default_daily',  '3',     'integer', 'Default daily VM quota for new users'),
+                    ('node.max_vms',         '50',    'integer', 'Maximum VMs allowed per Proxmox node'),
+                    ('platform.maintenance', 'false', 'boolean', 'If true, non-admin logins are blocked'),
+                    ('audit.retention_days', '90',    'integer', 'Days to retain audit log entries')
+                ON CONFLICT (key) DO NOTHING
+                """
+            )
+
         conn.commit()
     logger.info("Database schema verified / created successfully.")
 

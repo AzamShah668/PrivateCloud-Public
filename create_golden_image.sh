@@ -129,6 +129,10 @@ if command -v virt-customize &>/dev/null; then
         --run-command "sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config.d/60-cloudimg-settings.conf || true" \
         --run-command "echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config.d/60-cloudimg-settings.conf" \
         --run-command "cloud-init clean" \
+        --run-command "wget -q https://github.com/tsl0922/ttyd/releases/latest/download/ttyd.x86_64 -O /usr/local/bin/ttyd" \
+        --run-command "chmod +x /usr/local/bin/ttyd" \
+        --run-command "printf '[Unit]\nDescription=ttyd Web Terminal\nAfter=network.target\n\n[Service]\nExecStart=/usr/local/bin/ttyd -p 7681 -W -c $DEFAULT_USER:$DEFAULT_PASSWORD /bin/bash\nRestart=always\nUser=$DEFAULT_USER\nWorkingDirectory=/home/$DEFAULT_USER\n\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/ttyd.service" \
+        --run-command "systemctl enable ttyd" \
         --selinux-relabel 2>/dev/null || true
     success "Image customised successfully."
 else
@@ -224,4 +228,5 @@ success "  - qemu-guest-agent running at boot"
 success "  - SSH on port 22 with password auth enabled"
 success "  - User '$DEFAULT_USER' with sudo access"
 success "  - DHCP IP returned via guest agent to your API"
+success "  - ttyd web terminal on port 7681 (auto-start, writable)"
 echo ""

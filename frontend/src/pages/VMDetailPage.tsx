@@ -10,6 +10,7 @@ import LiveMetrics from "@/components/vm-detail/LiveMetrics";
 import ActionBar from "@/components/vm-detail/ActionBar";
 import ResizeModal from "@/components/vm-detail/ResizeModal";
 import DeleteConfirm from "@/components/vm-detail/DeleteConfirm";
+import ConsoleModal from "@/components/vm-detail/ConsoleModal";
 import { useVM, useUpdateVM, useDeleteVM } from "@/hooks/use-vms";
 
 /** Safely extract a number from an unknown payload value */
@@ -26,6 +27,7 @@ export default function VMDetailPage() {
 
   const [resizeOpen, setResizeOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [consoleOpen, setConsoleOpen] = useState(false);
 
   if (isLoading) {
     return (
@@ -181,10 +183,12 @@ export default function VMDetailPage() {
           >
             <ActionBar
               liveStatus={liveStatus}
+              vmIP={vm.vm_ip}
               onStart={() => handleAction("start")}
               onStop={() => handleAction("stop")}
               onRestart={() => handleAction("restart")}
               onResize={() => setResizeOpen(true)}
+              onConsole={() => setConsoleOpen(true)}
               onDelete={() => setDeleteOpen(true)}
               isPending={updateMutation.isPending}
             />
@@ -308,6 +312,13 @@ export default function VMDetailPage() {
       </main>
 
       {/* Modals */}
+      <ConsoleModal
+        open={consoleOpen}
+        onClose={() => setConsoleOpen(false)}
+        vmIP={vm.vm_ip ?? ""}
+        vmName={vm.vm_name}
+      />
+
       <ResizeModal
         open={resizeOpen}
         onClose={() => setResizeOpen(false)}

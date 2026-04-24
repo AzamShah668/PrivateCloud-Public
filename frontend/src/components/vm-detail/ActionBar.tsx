@@ -1,22 +1,26 @@
-import { Play, Square, RotateCw, Scaling, Trash2 } from "lucide-react";
+import { Play, Square, RotateCw, Scaling, Trash2, TerminalSquare } from "lucide-react";
 import Button from "@/components/ui/Button";
 
 interface ActionBarProps {
   liveStatus: string;
+  vmIP?: string | null;
   onStart: () => void;
   onStop: () => void;
   onRestart: () => void;
   onResize: () => void;
+  onConsole: () => void;
   onDelete: () => void;
   isPending: boolean;
 }
 
 export default function ActionBar({
   liveStatus,
+  vmIP,
   onStart,
   onStop,
   onRestart,
   onResize,
+  onConsole,
   onDelete,
   isPending,
 }: ActionBarProps) {
@@ -54,6 +58,16 @@ export default function ActionBar({
       >
         <RotateCw className="h-3.5 w-3.5" />
         Restart
+      </Button>
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={onConsole}
+        disabled={!isRunning || !vmIP || isPending}
+        title={!vmIP ? "IP not yet available" : !isRunning ? "VM must be running" : "Open web console"}
+      >
+        <TerminalSquare className="h-3.5 w-3.5" />
+        Console
       </Button>
       <Button
         variant="secondary"

@@ -6,16 +6,18 @@
 # Creates a Windows 11 golden image template (VMID 9001) on Proxmox.
 #
 # What this script does:
-#   - Auto-downloads Windows 11 ISO from Microsoft via Mido (if not present)
+#   - Detects any Windows 11 ISO already present in /var/lib/vz/template/iso/
+#   - If no ISO found, attempts download via Mido from Microsoft
 #   - Auto-downloads VirtIO drivers ISO (if not present)
-#   - Creates a VM with correct Windows 11 hardware (UEFI, TPM 2.0, SecureBoot)
+#   - Creates a VM with correct Windows 11 hardware (UEFI, TPM 2.0)
 #   - Injects an autounattend.xml via floppy to automate Windows installation
 #   - Bakes in the default username & password
 #   - Installs QEMU guest agent automatically during Windows setup
 #
 # Prerequisites:
 #   - Run this script as root on the Proxmox node
-#   - Internet access required (~6GB Windows 11 ISO downloaded from Microsoft)
+#   - Either place your Win11 ISO in /var/lib/vz/template/iso/ beforehand
+#     OR have internet access for Mido to download it (~6GB)
 #
 # Usage:
 #   chmod +x create_golden_image_win11.sh
@@ -30,28 +32,22 @@ set -euo pipefail
 VMID=9001
 VM_NAME="win11-golden"
 NODE="home"
-STORAGE="local-lvm"          # where to store the VM disk
-BRIDGE="vmbr0"               # your Proxmox network bridge
-DISK_SIZE="64G"              # Windows 11 needs at least 64G
-RAM_MB=4096                  # Windows 11 minimum is 4096 MB
+STORAGE="local-lvm"
+BRIDGE="vmbr0"
+DISK_SIZE="64G"
+RAM_MB=4096
 CPU_CORES=2
 
-# Default credentials baked into Windows via autounattend.xml
-# These must match VM_DEFAULT_USERNAME and VM_DEFAULT_PASSWORD in your .env
 DEFAULT_USER="windows"
-DEFAULT_PASSWORD="verventech123"   # ← must match VM_DEFAULT_PASSWORD in .env
+DEFAULT_PASSWORD="verventech123"
 
-# ISO storage paths
 ISO_DIR="/var/lib/vz/template/iso"
-WIN11_ISO="${ISO_DIR}/Win11.iso"
+WIN11_ISO=""                  # auto-detected below — do not set manually
 VIRTIO_ISO="${ISO_DIR}/virtio-win.iso"
 VIRTIO_ISO_URL="https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
 
-# Mido — downloads Windows ISOs directly from Microsoft
 MIDO_URL="https://raw.githubusercontent.com/ElliotKillick/Mido/main/Mido.sh"
 MIDO_SCRIPT="/tmp/Mido.sh"
-
-# Floppy image that carries autounattend.xml into the Windows installer
 FLOPPY_IMG="/tmp/autounattend.img"
 # =============================================================================
 
@@ -74,22 +70,14 @@ echo -e "${BOLD}║   Proxmox Golden Image Creator               ║${NC}"
 echo -e "${BOLD}║   Windows 11 — VMID $VMID                    ║${NC}"
 echo -e "${BOLD}╚══════════════════════════════════════════════╝${NC}"
 echo ""
-info "Node     : $NODE"
-info "Storage  : $STORAGE"
-info "VMID     : $VMID"
-info "Disk     : $DISK_SIZE"
-info "RAM      : ${RAM_MB}MB"
-info "CPUs     : $CPU_CORES"
-info "User     : $DEFAULT_USER"
-echo ""
 
 # ── Root check ────────────────────────────────────────────────────────────────
 [[ $EUID -eq 0 ]] || die "Must be run as root."
 
-# ── Make sure VMID is free ────────────────────────────────────────────────────
+# ── VMID check ────────────────────────────────────────────────────────────────
 step "Step 1/8 — Checking VMID $VMID is free"
 if qm status $VMID &>/dev/null 2>&1; then
-    die "VMID $VMID already exists. Remove it first with: qm destroy $VMID --purge"
+    die "VMID $VMID already exists. Remove it first with:\n  qm destroy $VMID --purge"
 fi
 success "VMID $VMID is free."
 
@@ -105,76 +93,84 @@ for tool in wget curl mkdosfs mcopy; do
 done
 mkdir -p "$ISO_DIR"
 
-# ── Download Windows 11 ISO via Mido ─────────────────────────────────────────
+# ── Detect Windows 11 ISO ─────────────────────────────────────────────────────
 step "Step 3/8 — Windows 11 ISO"
-if [[ -f "$WIN11_ISO" ]]; then
-    info "Windows 11 ISO already exists at $WIN11_ISO — skipping download."
-    success "Windows 11 ISO found."
+info "Scanning $ISO_DIR for any Windows 11 ISO..."
+
+# Search for any ISO that looks like Windows 11 — case insensitive
+# Matches: Win11.iso, Windows11.iso, win11_23H2.iso, Windows_11_x64.iso, etc.
+FOUND_ISO=$(find "$ISO_DIR" -maxdepth 1 -iname "*.iso" \
+    | grep -iE "(win.?11|windows.?11)" \
+    | head -1 || true)
+
+if [[ -n "$FOUND_ISO" ]]; then
+    WIN11_ISO="$FOUND_ISO"
+    ISO_SIZE=$(du -sh "$WIN11_ISO" | cut -f1)
+    success "Found Windows 11 ISO: $WIN11_ISO ($ISO_SIZE)"
+    info "Skipping download — using existing ISO."
 else
-    info "Windows 11 ISO not found — downloading from Microsoft via Mido..."
-    info "Mido downloads directly from Microsoft's official servers."
+    # No ISO found — try Mido
+    warn "No Windows 11 ISO found in $ISO_DIR"
+    info "Files currently in $ISO_DIR:"
+    ls -lh "$ISO_DIR" 2>/dev/null || info "(directory is empty)"
+    echo ""
+    info "Attempting download via Mido from Microsoft..."
     info "This will download ~6GB — please be patient..."
     echo ""
 
-    # Download Mido script
     if ! curl -fsSL "$MIDO_URL" -o "$MIDO_SCRIPT" 2>/dev/null; then
-        die "Failed to download Mido. Check your internet connection.\nURL: $MIDO_URL"
+        echo ""
+        die "Failed to download Mido AND no ISO found locally.\n\n  Manual fix:\n  1. Download Windows 11 ISO on your PC from:\n     https://www.microsoft.com/software-download/windows11\n  2. Copy it to your Proxmox node:\n     scp Win11.iso root@<proxmox-ip>:${ISO_DIR}/Win11.iso\n  3. Re-run this script."
     fi
     chmod +x "$MIDO_SCRIPT"
     success "Mido downloaded."
 
-    # Run Mido to download Windows 11 — outputs to current directory
-    # so we cd to ISO_DIR first then move the file
     cd "$ISO_DIR"
-    bash "$MIDO_SCRIPT" win11x64 || die "Mido failed to download Windows 11 ISO.\nCheck your internet connection and try again."
+    bash "$MIDO_SCRIPT" win11x64 || die "Mido failed. See manual download instructions above."
     cd - > /dev/null
 
-    # Mido saves as win11x64.iso — rename to Win11.iso
-    if [[ -f "${ISO_DIR}/win11x64.iso" ]]; then
-        mv "${ISO_DIR}/win11x64.iso" "$WIN11_ISO"
-        success "Windows 11 ISO downloaded and saved as $WIN11_ISO"
-    elif [[ -f "${ISO_DIR}/Win11.iso" ]]; then
-        success "Windows 11 ISO already named correctly: $WIN11_ISO"
-    else
-        die "Mido ran but ISO file not found in $ISO_DIR. Check disk space and try again."
-    fi
+    # Find whatever Mido downloaded
+    FOUND_ISO=$(find "$ISO_DIR" -maxdepth 1 -iname "*.iso" \
+        | grep -iE "(win.?11|windows.?11)" \
+        | head -1 || true)
 
+    [[ -n "$FOUND_ISO" ]] || die "Mido ran but no Windows 11 ISO found in $ISO_DIR. Check disk space."
+    WIN11_ISO="$FOUND_ISO"
+    success "Downloaded: $WIN11_ISO"
     rm -f "$MIDO_SCRIPT"
 fi
 
-# ── Download VirtIO drivers ISO ───────────────────────────────────────────────
+info "Using ISO: $WIN11_ISO"
+
+# ── VirtIO drivers ISO ────────────────────────────────────────────────────────
 step "Step 4/8 — VirtIO drivers ISO"
 if [[ -f "$VIRTIO_ISO" ]]; then
-    info "VirtIO ISO already exists at $VIRTIO_ISO — skipping download."
-    success "VirtIO ISO found."
+    VIRTIO_SIZE=$(du -sh "$VIRTIO_ISO" | cut -f1)
+    info "VirtIO ISO already exists ($VIRTIO_SIZE) — skipping download."
+    success "VirtIO ISO found: $VIRTIO_ISO"
 else
-    info "Downloading VirtIO drivers ISO..."
-    info "This may take a few minutes..."
+    info "Downloading VirtIO drivers ISO (~600MB)..."
     wget -q --show-progress -O "$VIRTIO_ISO" "$VIRTIO_ISO_URL" \
         || die "Failed to download VirtIO ISO. Check your internet connection."
     success "VirtIO ISO downloaded: $VIRTIO_ISO"
 fi
 
+# Get just the filename for Proxmox volume references
+WIN11_ISO_NAME=$(basename "$WIN11_ISO")
+info "ISO filename for Proxmox: $WIN11_ISO_NAME"
+
 # ── Create autounattend.xml floppy image ──────────────────────────────────────
 step "Step 5/8 — Creating autounattend.xml floppy image"
 info "Building unattended Windows install answer file..."
 
-# Create a 1.44MB FAT floppy image
 dd if=/dev/zero of="$FLOPPY_IMG" bs=1024 count=1440 2>/dev/null
 mkdosfs "$FLOPPY_IMG" 2>/dev/null
 success "Floppy image created."
 
-# Write autounattend.xml to a temp file first (avoids heredoc variable issues)
 cat > /tmp/autounattend.xml << XMLEOF
 <?xml version="1.0" encoding="utf-8"?>
 <unattend xmlns="urn:schemas-microsoft-com:unattend">
 
-  <!-- ═══════════════════════════════════════════════════
-       Windows PE phase
-       - Load VirtIO storage drivers so installer sees the disk
-       - Bypass TPM/SecureBoot/RAM checks for VM
-       - Partition and format the disk
-       ═══════════════════════════════════════════════════ -->
   <settings pass="windowsPE">
 
     <component name="Microsoft-Windows-PnpCustomizationsWinPE"
@@ -280,9 +276,6 @@ cat > /tmp/autounattend.xml << XMLEOF
     </component>
   </settings>
 
-  <!-- ═══════════════════════════════════════════════════
-       Specialize phase — set computer name + timezone
-       ═══════════════════════════════════════════════════ -->
   <settings pass="specialize">
     <component name="Microsoft-Windows-Shell-Setup"
                processorArchitecture="amd64"
@@ -295,12 +288,6 @@ cat > /tmp/autounattend.xml << XMLEOF
     </component>
   </settings>
 
-  <!-- ═══════════════════════════════════════════════════
-       OOBE phase
-       - Create local user with baked-in credentials
-       - Skip Microsoft account prompts
-       - Install QEMU guest agent from VirtIO ISO
-       ═══════════════════════════════════════════════════ -->
   <settings pass="oobeSystem">
 
     <component name="Microsoft-Windows-Shell-Setup"
@@ -384,21 +371,17 @@ cat > /tmp/autounattend.xml << XMLEOF
 </unattend>
 XMLEOF
 
-# Substitute actual credentials into the XML (avoids heredoc variable expansion issues)
 sed -i "s/WINUSER/${DEFAULT_USER}/g" /tmp/autounattend.xml
 sed -i "s/WINPASSWORD/${DEFAULT_PASSWORD}/g" /tmp/autounattend.xml
 
-# Write the XML into the floppy image
 mcopy -i "$FLOPPY_IMG" /tmp/autounattend.xml ::autounattend.xml
 rm -f /tmp/autounattend.xml
-
-# Save floppy to ISO storage so Proxmox can attach it
 cp "$FLOPPY_IMG" "${ISO_DIR}/autounattend.img"
-success "autounattend.xml written to floppy image."
-success "Floppy saved to ${ISO_DIR}/autounattend.img"
+success "autounattend.xml written to floppy image: ${ISO_DIR}/autounattend.img"
 
 # ── Create the VM ─────────────────────────────────────────────────────────────
 step "Step 6/8 — Creating Windows 11 VM $VMID in Proxmox"
+info "Using ISO: local:iso/${WIN11_ISO_NAME}"
 
 qm create $VMID \
     --name "$VM_NAME" \
@@ -414,7 +397,7 @@ qm create $VMID \
     --tpmstate0 ${STORAGE}:4,version=v2.0 \
     --efidisk0 ${STORAGE}:1,efitype=4m,pre-enrolled-keys=1 \
     --vga std \
-    --ide0 local:iso/Win11.iso,media=cdrom \
+    --ide0 local:iso/${WIN11_ISO_NAME},media=cdrom \
     --ide1 local:iso/virtio-win.iso,media=cdrom \
     --ide2 local:iso/autounattend.img,media=cdrom
 
@@ -423,30 +406,24 @@ success "VM $VMID created."
 # ── Create and attach main disk ───────────────────────────────────────────────
 step "Step 7/8 — Creating and attaching disk"
 info "Creating ${DISK_SIZE} disk in ${STORAGE}..."
-
 qm set $VMID --scsi0 ${STORAGE}:${DISK_SIZE},discard=on,ssd=1
-success "Disk created and attached."
-
-# Boot from Windows ISO first, then disk
 qm set $VMID --boot order="ide0;scsi0"
-success "Boot order set: Windows ISO → Disk"
+success "Disk created. Boot order: Windows ISO → Disk"
 
-# ── Verify agent config is set ────────────────────────────────────────────────
+# ── Verify agent config ───────────────────────────────────────────────────────
 AGENT_CHECK=$(qm config $VMID | grep "^agent:" || echo "")
 if [[ -z "$AGENT_CHECK" ]]; then
-    warn "Agent flag missing — setting it explicitly..."
+    warn "Agent flag missing — setting explicitly..."
     qm set $VMID --agent enabled=1,fstrim_cloned_disks=1
 fi
-success "QEMU guest agent flag: $(qm config $VMID | grep '^agent:')"
+success "QEMU guest agent: $(qm config $VMID | grep '^agent:')"
 
-# ── Cleanup temp files ────────────────────────────────────────────────────────
-info "Cleaning up temporary files..."
+# ── Cleanup ───────────────────────────────────────────────────────────────────
 rm -f "$FLOPPY_IMG"
 success "Cleanup done."
 
-# ── Print final config + next steps ──────────────────────────────────────────
+# ── Next steps ────────────────────────────────────────────────────────────────
 step "Step 8/8 — Done!"
-
 echo ""
 echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"
 echo -e "${BOLD}║   Windows 11 VM Created Successfully!        ║${NC}"
@@ -455,34 +432,25 @@ echo ""
 info "Final VM config:"
 qm config $VMID
 echo ""
-
-echo -e "${YELLOW}${BOLD}⚠️  IMPORTANT — 3 manual steps required after this:${NC}"
+echo -e "${YELLOW}${BOLD}⚠️  3 manual steps required after this:${NC}"
 echo ""
-echo "  1. Start the VM and let Windows install automatically:"
+echo "  1. Start the VM and watch installation (15-20 min):"
 echo "     qm start $VMID"
-echo "     (Open Proxmox noVNC console to watch — takes ~15-20 minutes)"
+echo "     (Open Proxmox noVNC console to monitor)"
 echo ""
-echo "  2. Once Windows boots to desktop, run sysprep to generalise:"
+echo "  2. Once Windows boots to desktop, run sysprep:"
 echo "     C:\Windows\System32\Sysprep\sysprep.exe /generalize /oobe /shutdown"
-echo "     (VM will shut down automatically after sysprep)"
+echo "     (VM shuts down automatically)"
 echo ""
 echo "  3. Convert to template:"
 echo "     qm template $VMID"
-echo ""
-echo "  Optional — remove ISOs to save space after templating:"
-echo "     qm set $VMID --delete ide0,ide1,ide2"
 echo ""
 echo -e "${GREEN}${BOLD}Credentials baked in:${NC}"
 echo "   Username : $DEFAULT_USER"
 echo "   Password : $DEFAULT_PASSWORD"
 echo ""
-echo -e "${GREEN}${BOLD}Update your .env file:${NC}"
+echo -e "${GREEN}${BOLD}Update your .env:${NC}"
 echo "   GOLDEN_IMAGE_VMID=$VMID"
 echo "   VM_DEFAULT_USERNAME=$DEFAULT_USER"
 echo "   VM_DEFAULT_PASSWORD=$DEFAULT_PASSWORD"
-echo ""
-success "Done. After sysprep + qm template, VMs cloned from VMID $VMID will have:"
-success "  - Windows 11 with user '$DEFAULT_USER' and baked-in password"
-success "  - QEMU guest agent running at boot (IP reported to your API)"
-success "  - VirtIO drivers installed (disk + network + balloon)"
 echo ""

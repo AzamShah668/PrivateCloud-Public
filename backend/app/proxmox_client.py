@@ -74,7 +74,7 @@ class ProxmoxClient:
     """
 
     # Base URL of the Proxmox API. Port 8006 is the default.
-    API_BASE = "https://{host}:8006/api2/json"
+    API_BASE = "https://{host}{port_suffix}/api2/json"
 
     # Tickets are valid for ~2 hours. We re-auth 5 minutes before expiry.
     TICKET_LIFETIME_MINUTES = 115
@@ -82,6 +82,17 @@ class ProxmoxClient:
     def __init__(self):
         self.host         = os.getenv("PROXMOX_HOST",     "192.168.1.100")
         self.default_node = os.getenv("PROXMOX_NODE",     "home")
+
+
+        # --- NGROK ADJUSTMENT ---
+        # If the host contains 'ngrok-free.dev', we don't need port 8006
+        if "ngrok-free" in self.host:
+            self.port_suffix = "" 
+            self.verify_ssl = True # ngrok provides valid SSL!
+        else:
+            self.port_suffix = ":8006"
+            self.verify_ssl = os.getenv("PROXMOX_VERIFY_SSL", "false").lower() == "true"
+        # ------------------------
 
         # ── Auth method selection ────────────────────────────────────────
         # If PROXMOX_TOKEN_ID is set → use API token auth (preferred).
@@ -202,21 +213,23 @@ class ProxmoxClient:
         return {"PVEAuthCookie": self._ticket}
 
     def _get_headers(self) -> Dict[str, str]:
-        """
-        Return headers needed for API requests.
-        - Token auth: Authorization header on ALL requests (GET, POST, DELETE, etc.)
-        - Ticket auth: CSRFPreventionToken on state-changing requests only
-        """
+        headers = {}
+        
+        # 1. Add the ngrok bypass header
+        headers["ngrok-skip-browser-warning"] = "true"
+
+        # 2. Add Auth
         if self._use_token_auth:
-            # Proxmox token format: PVEAPIToken=user@realm!tokenname=uuid-secret
-            return {
-                "Authorization": f"PVEAPIToken={self._token_id}={self._token_secret}"
-            }
-        return {"CSRFPreventionToken": self._csrf_token}
+            headers["Authorization"] = f"PVEAPIToken={self._token_id}={self._token_secret}"
+        else:
+            headers["CSRFPreventionToken"] = self._csrf_token
+            
+        return headers
 
     def _url(self, path: str) -> str:
-        """Build the full API URL for a given path."""
-        base = f"https://{self.host}:8006/api2/json"
+        """Build the full API URL."""
+        # Use the dynamic port suffix (blank for ngrok, :8006 for local)
+        base = f"https://{self.host}{self.port_suffix}/api2/json"
         return f"{base}/{path.lstrip('/')}"
 
     def _get(self, path: str) -> Any:

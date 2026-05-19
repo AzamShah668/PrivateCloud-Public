@@ -1,4 +1,4 @@
-import { Play, Square, RotateCw, Scaling, Trash2, TerminalSquare } from "lucide-react";
+import { Play, Square, RotateCw, Scaling, Trash2, TerminalSquare, Monitor } from "lucide-react";
 import Button from "@/components/ui/Button";
 
 interface ActionBarProps {
@@ -11,6 +11,9 @@ interface ActionBarProps {
   onConsole: () => void;
   onDelete: () => void;
   isPending: boolean;
+  /** Windows 11: open Guacamole RDP when set */
+  onRemoteDesktop?: () => void;
+  showRemoteDesktop?: boolean;
 }
 
 export default function ActionBar({
@@ -23,6 +26,8 @@ export default function ActionBar({
   onConsole,
   onDelete,
   isPending,
+  onRemoteDesktop,
+  showRemoteDesktop,
 }: ActionBarProps) {
   const isRunning = liveStatus === "running";
   const isStopped = liveStatus === "stopped";
@@ -64,11 +69,23 @@ export default function ActionBar({
         size="sm"
         onClick={onConsole}
         disabled={!isRunning || !vmIP || isPending}
-        title={!vmIP ? "IP not yet available" : !isRunning ? "VM must be running" : "Open web console"}
+        title={!vmIP ? "IP not yet available" : !isRunning ? "VM must be running" : "Open web console (ttyd)"}
       >
         <TerminalSquare className="h-3.5 w-3.5" />
         Console
       </Button>
+      {showRemoteDesktop && onRemoteDesktop && (
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={onRemoteDesktop}
+          disabled={!isRunning || !vmIP || isPending}
+          title={!vmIP ? "IP not yet available" : !isRunning ? "VM must be running" : "Open remote desktop (Guacamole)"}
+        >
+          <Monitor className="h-3.5 w-3.5" />
+          Desktop
+        </Button>
+      )}
       <Button
         variant="secondary"
         size="sm"

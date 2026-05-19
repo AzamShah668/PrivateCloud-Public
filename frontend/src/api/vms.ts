@@ -63,3 +63,13 @@ export async function updateVM(
 export async function deleteVM(jobId: number): Promise<VMJob> {
   return api.delete(`vms/${jobId}`).json<VMJob>();
 }
+
+export interface DesktopSession {
+  client_url: string;
+  connection_name: string;
+}
+
+/** Mint a Guacamole HTML5 RDP session (Windows VMs only). */
+export async function createDesktopSession(jobId: number): Promise<DesktopSession> {
+  return api.post(`vms/${jobId}/desktop-session`).json<DesktopSession>();
+}

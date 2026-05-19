@@ -6,8 +6,12 @@
 #   docker compose up --build
 #
 # Services defined here:
-#   postgres  — PostgreSQL 16 database
-#   backend   — FastAPI application (your code)
+#   postgres         — PostgreSQL 16 (app data)
+#   backend          — FastAPI application
+#   guacd            — Apache Guacamole proxy daemon (RDP → WebSocket)
+#   mysql-guacamole  — MySQL (Guacamole auth + connection metadata)
+#   guacamole        — Guacamole web application (HTML5 client, port 9080)
+#   frontend         — React UI (nginx)
 #
 # ── How the .env file works ──────────────────────────────────────────────────
 # Docker Compose automatically reads a file called .env from the SAME
@@ -98,6 +102,11 @@ services:
       # the backend must use "postgres" (the service name) not "localhost".
       DB_HOST: postgres
       DB_PORT: "5432"
+      # Apache Guacamole (HTML5 RDP) — same compose stack
+      GUACAMOLE_API_URL: http://guacamole:8080/guacamole
+      GUACAMOLE_PUBLIC_URL: http://localhost:9080/guacamole
+      GUACAMOLE_ADMIN_USER: guacadmin
+      GUACAMOLE_ADMIN_PASSWORD: ${GUACAMOLE_ADMIN_PASSWORD:-guacadmin}
 
     ports:
       - "8000:8000"
@@ -108,6 +117,8 @@ services:
         # Prevents "password authentication failed" errors caused by the
         # backend starting before Postgres has finished initialising.
         condition: service_healthy
+      guacamole:
+        condition: service_started
 
     networks:
       - proxmox_net
@@ -120,6 +131,57 @@ services:
       - ./db:/home/appuser/app/db
 
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+
+  # ── Apache Guacamole (guacd + MySQL + web app) ─────────────────────────────
+  guacd:
+    image: guacamole/guacd:1.5.5
+    container_name: proxmox_guacd
+    restart: unless-stopped
+    networks:
+      - proxmox_net
+
+  mysql-guacamole:
+    image: mysql:8.4
+    container_name: proxmox_mysql_guacamole
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${GUACAMOLE_MYSQL_ROOT_PASSWORD:-guacroot}
+      MYSQL_DATABASE: guacamole
+      MYSQL_USER: guacamole
+      MYSQL_PASSWORD: ${GUACAMOLE_MYSQL_PASSWORD:-guacamole}
+    volumes:
+      - mysql_guacamole_data:/var/lib/mysql
+      - ./docker/guacamole/schema:/docker-entrypoint-initdb.d:ro
+    networks:
+      - proxmox_net
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 35
+      start_period: 60s
+
+  guacamole:
+    image: guacamole/guacamole:1.5.5
+    container_name: proxmox_guacamole
+    restart: unless-stopped
+    depends_on:
+      mysql-guacamole:
+        condition: service_healthy
+      guacd:
+        condition: service_started
+    environment:
+      GUACD_HOSTNAME: guacd
+      MYSQL_HOSTNAME: mysql-guacamole
+      MYSQL_PORT: "3306"
+      MYSQL_DATABASE: guacamole
+      MYSQL_USER: guacamole
+      MYSQL_PASSWORD: ${GUACAMOLE_MYSQL_PASSWORD:-guacamole}
+    ports:
+      - "9080:8080"
+    networks:
+      - proxmox_net
 
 
   # ── React Frontend ─────────────────────────────────────────────────────────
@@ -155,3 +217,4 @@ networks:
 # =============================================================================
 volumes:
   postgres_data:
+  mysql_guacamole_data:

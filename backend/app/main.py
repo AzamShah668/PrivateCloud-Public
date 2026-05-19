@@ -29,6 +29,7 @@ from app.routes.auth_routes import router as auth_router
 from app.routes.vm_routes import router as vm_router
 from app.routes.admin_routes import router as admin_router
 from app.routes.ai_routes import router as ai_router
+from app.routes.desktop_routes import router as desktop_router
 
 # ---------------------------------------------------------------------------
 # Logging configuration
@@ -113,6 +114,9 @@ app.include_router(auth_router)
 
 # VM routes:    /vms/,  /vms/{job_id}
 app.include_router(vm_router)
+
+# Guacamole desktop:  POST /vms/{job_id}/desktop-session
+app.include_router(desktop_router)
 
 # Admin routes:  /admin/stats,  /admin/users,  /admin/vms,  /admin/audit-logs
 app.include_router(admin_router)

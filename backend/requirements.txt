@@ -27,3 +27,6 @@ urllib3>=2.0               # Used by requests; pin to avoid SSL warnings
 
 # ── Form data parsing (needed for OAuth2PasswordRequestForm) ─────────────────
 python-multipart>=0.0.9    # FastAPI uses this to parse form-encoded bodies
+
+# - LLM ChatOps (OpenAI function calling)
+openai>=1.50.0

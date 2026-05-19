@@ -105,9 +105,15 @@ Credentials baked in:
 - Username: `windows`
 - Password: `verventech123`
 
-Make sure these match your `.env` file:
+Make sure these match your `.env` file when you run **only** Windows templates as the primary image:
+
 ```env
-GOLDEN_IMAGE_VMID=9001
-VM_DEFAULT_USERNAME=windows
-VM_DEFAULT_PASSWORD=verventech123
+GOLDEN_IMAGE_VMID=9000
+WINDOWS_TEMPLATE_VMID=9001
+VM_DEFAULT_USERNAME=ubuntu
+VM_DEFAULT_PASSWORD=your_linux_template_password
+VM_WINDOWS_USERNAME=windows
+VM_WINDOWS_PASSWORD=verventech123
 ```
+
+If you use **both** Linux (9000) and Windows (9001) templates, keep `GOLDEN_IMAGE_VMID=9000` for Linux clones and set `WINDOWS_TEMPLATE_VMID=9001` for Windows. Set `VM_WINDOWS_*` to the logins baked into the Windows golden image.

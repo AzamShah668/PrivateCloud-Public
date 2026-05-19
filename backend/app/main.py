@@ -28,6 +28,7 @@ from db import database
 from app.routes.auth_routes import router as auth_router
 from app.routes.vm_routes import router as vm_router
 from app.routes.admin_routes import router as admin_router
+from app.routes.ai_routes import router as ai_router
 
 # ---------------------------------------------------------------------------
 # Logging configuration
@@ -115,6 +116,9 @@ app.include_router(vm_router)
 
 # Admin routes:  /admin/stats,  /admin/users,  /admin/vms,  /admin/audit-logs
 app.include_router(admin_router)
+
+# AI ChatOps:  /ai/chat
+app.include_router(ai_router)
 
 
 # ---------------------------------------------------------------------------

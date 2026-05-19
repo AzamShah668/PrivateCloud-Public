@@ -1,6 +1,6 @@
 # Golden Image Setup Guide
 
-This guide walks you through creating the Ubuntu 24.04 golden image template (VMID 9000) on your Proxmox node. This template is what your PrivateCloud app clones every time a user creates a new VM.
+This guide walks you through creating the Ubuntu 24.04 golden image template (VMID 9000) on your Proxmox node. The PrivateCloud app clones **this** template for Linux OS choices (`ubuntu-*`, `debian-12`, `centos-9`). **Windows 11** uses a separate template (VMID **9001** by default); see [Setup_win11_iso.md](Setup_win11_iso.md) and set `WINDOWS_TEMPLATE_VMID` in `.env`.
 
 ---
 

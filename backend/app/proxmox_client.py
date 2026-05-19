@@ -118,14 +118,21 @@ class ProxmoxClient:
         self._ticket_expiry: Optional[datetime] = None
 
         # ── Golden image config ──────────────────────────────────────────
-        # VMID of the golden image template to clone new VMs from.
-        # Set GOLDEN_IMAGE_VMID in your .env (default: 9000).
+        # VMID of the Linux (cloud-init) golden template — cloned for
+        # ubuntu-*, debian-*, centos-* OS choices. Default 9000.
         self.golden_image_vmid: int = int(os.getenv("GOLDEN_IMAGE_VMID", "9000"))
+        # Windows 11 template VMID — cloned only when os_choice is windows-11.
+        self.windows_template_vmid: int = int(os.getenv("WINDOWS_TEMPLATE_VMID", "9001"))
 
-        # Default SSH credentials baked into the golden image.
+        # Default SSH credentials baked into the Linux golden image.
         # These are returned to the user after VM creation so they can log in.
         self.vm_default_username: str = os.getenv("VM_DEFAULT_USERNAME", "ubuntu")
         self.vm_default_password: str = os.getenv("VM_DEFAULT_PASSWORD", "")
+
+        # Optional: credentials for the Windows golden template (falls back to
+        # VM_DEFAULT_* if unset so a single .env still works for one-OS labs).
+        self.vm_windows_username: str = os.getenv("VM_WINDOWS_USERNAME") or self.vm_default_username
+        self.vm_windows_password: str = os.getenv("VM_WINDOWS_PASSWORD") or self.vm_default_password
 
         # Suppress urllib3's "InsecureRequestWarning" when verify_ssl=False
         if not self.verify_ssl:
@@ -136,6 +143,23 @@ class ProxmoxClient:
             logger.info("ProxmoxClient using API token auth (no ticket renewal needed).")
         else:
             logger.info("ProxmoxClient using legacy ticket auth (PROXMOX_TOKEN_ID not set).")
+
+    def get_clone_template_vmid(self, os_choice: str) -> int:
+        """
+        Return the Proxmox template VMID to clone for this OS.
+
+        Linux family uses GOLDEN_IMAGE_VMID (default 9000). Windows 11 uses
+        WINDOWS_TEMPLATE_VMID (default 9001).
+        """
+        if os_choice == "windows-11":
+            return self.windows_template_vmid
+        return self.golden_image_vmid
+
+    def get_post_provision_credentials(self, os_choice: str) -> tuple[str, str]:
+        """Username/password stored on the job for the user to log in after provisioning."""
+        if os_choice == "windows-11":
+            return self.vm_windows_username, self.vm_windows_password
+        return self.vm_default_username, self.vm_default_password
 
     # =========================================================================
     # ── Authentication ────────────────────────────────────────────────────────

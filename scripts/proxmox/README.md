@@ -8,7 +8,7 @@ Scripts that prepare the Proxmox node so the PrivateCloud backend can provision 
 
 **When to run it:** one time only, on the Proxmox node, as root. Re-run only if you deleted the template or need to rebuild it.
 
-**Where the template is used in the backend:** [backend/app/proxmox_client.py](../../backend/app/proxmox_client.py) → `CLOUD_TEMPLATE_MAP` maps `ubuntu-24.04` to VMID `9000`. The create-VM route clones this template when a user asks for Ubuntu 24.04. If the template is missing, the route falls back to the old ISO install path.
+**Where the template is used in the backend:** `GOLDEN_IMAGE_VMID` (default `9000`) in [backend/app/proxmox_client.py](../../backend/app/proxmox_client.py). The create-VM flow clones that template for Linux OS choices (`ubuntu-*`, `debian-12`, `centos-9`). For **Windows 11**, set `WINDOWS_TEMPLATE_VMID` (default `9001`) and follow [Setup_win11_iso.md](../../Setup_win11_iso.md).
 
 ## How to run
 
@@ -34,7 +34,7 @@ SKIP_VIRT_CUSTOMIZE=1 ./SETUP_GOLDEN_IMAGE.sh
 | Variable | Default | Purpose |
 |---|---|---|
 | `CLOUD_IMG` | `/root/noble-server-cloudimg-amd64.img` | Path to the Ubuntu cloud image |
-| `VMID` | `9000` | Template VMID (must match `CLOUD_TEMPLATE_MAP` in backend) |
+| `VMID` | `9000` | Template VMID (must match `GOLDEN_IMAGE_VMID` in backend `.env`) |
 | `NAME` | `ubuntu-24.04-template` | Template display name |
 | `STORAGE` | `local-lvm` | Proxmox storage pool |
 | `SKIP_VIRT_CUSTOMIZE` | `0` | Set to `1` to skip baking agent into disk (uses cloud-init snippet instead) |
@@ -51,4 +51,8 @@ qm config 9000 | grep template
 # Expected: template: 1
 ```
 
-If both succeed, the backend can clone this template.
+If both succeed, the backend can clone this template for Linux VMs.
+
+## Windows 11 template
+
+Build a Windows template (e.g. VMID **9001**) using [Setup_win11_iso.md](../../Setup_win11_iso.md). Set `WINDOWS_TEMPLATE_VMID=9001` in the backend environment so `os_choice: windows-11` clones that template.

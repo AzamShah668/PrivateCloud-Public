@@ -11,6 +11,7 @@ import ActionBar from "@/components/vm-detail/ActionBar";
 import ResizeModal from "@/components/vm-detail/ResizeModal";
 import DeleteConfirm from "@/components/vm-detail/DeleteConfirm";
 import ConsoleModal from "@/components/vm-detail/ConsoleModal";
+import GuacamoleModal from "@/components/vm-detail/GuacamoleModal";
 import { useVM, useUpdateVM, useDeleteVM } from "@/hooks/use-vms";
 
 /** Safely extract a number from an unknown payload value */
@@ -28,6 +29,7 @@ export default function VMDetailPage() {
   const [resizeOpen, setResizeOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [consoleOpen, setConsoleOpen] = useState(false);
+  const [desktopOpen, setDesktopOpen] = useState(false);
 
   if (isLoading) {
     return (
@@ -79,6 +81,7 @@ export default function VMDetailPage() {
   // the VM isn't usable yet — any action PATCH returns 409 Conflict.
   const isProvisioning = vm.status === "queued" || vm.status === "running";
   const isFailed = vm.status === "failed";
+  const isWindows = vm.os_choice === "windows-11";
   // IP polling timed out but VM is otherwise up.
   const ipTimedOut = vm.status === "done" && !vm.vm_ip;
 
@@ -189,6 +192,8 @@ export default function VMDetailPage() {
               onRestart={() => handleAction("restart")}
               onResize={() => setResizeOpen(true)}
               onConsole={() => setConsoleOpen(true)}
+              onRemoteDesktop={() => setDesktopOpen(true)}
+              showRemoteDesktop={isWindows}
               onDelete={() => setDeleteOpen(true)}
               isPending={updateMutation.isPending}
             />
@@ -226,11 +231,18 @@ export default function VMDetailPage() {
                 <CopyableField icon={<KeyRound className="h-3.5 w-3.5" />} label="Password" value={vm.vm_password} />
               )}
             </div>
-            {vm.vm_ip && vm.vm_username && (
+            {vm.vm_ip && vm.vm_username && !isWindows && (
               <CopyableField
                 icon={<Terminal className="h-3.5 w-3.5" />}
                 label="SSH Command"
                 value={`ssh ${vm.vm_username}@${vm.vm_ip}`}
+              />
+            )}
+            {vm.vm_ip && vm.vm_username && isWindows && (
+              <CopyableField
+                icon={<Monitor className="h-3.5 w-3.5" />}
+                label="RDP"
+                value={`${vm.vm_ip}:3389`}
               />
             )}
           </motion.div>
@@ -316,6 +328,12 @@ export default function VMDetailPage() {
         open={consoleOpen}
         onClose={() => setConsoleOpen(false)}
         vmIP={vm.vm_ip ?? ""}
+        vmName={vm.vm_name}
+      />
+      <GuacamoleModal
+        open={desktopOpen}
+        onClose={() => setDesktopOpen(false)}
+        jobId={vm.id}
         vmName={vm.vm_name}
       />
 

@@ -9,6 +9,7 @@ import QuotaIndicator from "@/components/dashboard/QuotaIndicator";
 import Button from "@/components/ui/Button";
 import GlitchText from "@/components/ui/GlitchText";
 import { useVMs } from "@/hooks/use-vms";
+import AIChatOps from "@/components/dashboard/AIChatOps";
 
 export default function DashboardPage() {
   const { data: vms, isError } = useVMs();
@@ -74,6 +75,9 @@ export default function DashboardPage() {
           {/* Row 2: Recent Activity + Quick Deploy */}
           <div className="xl:col-span-7">
             <RecentActivity vms={vms} />
+          </div>
+          <div className="xl:col-span-5">
+            <AIChatOps />
           </div>
 
           <div className="xl:col-span-5">

@@ -139,23 +139,30 @@ def _provision_vm_background(
 ) -> None:
     """
     Do the slow Proxmox work out of band:
-      1. Clone the golden image (wait for clone task).
+      1. Clone the correct golden template for the requested OS (Linux vs Windows).
       2. Apply CPU / RAM config.
       3. Start the VM (wait for start task).
       4. Poll the QEMU guest agent for an IP (generous timeout).
       5. Persist status=done with IP + credentials, or status=failed with error.
       6. Write an audit log entry.
 
-    IP polling timeout is 300 s because first boot runs cloud-init before
-    the guest agent can answer — 120 s was not enough after the recent
-    network switch to the external bridge.
+    IP polling: 300s for Linux (cloud-init + DHCP); 600s for Windows 11.
     """
     try:
         database.update_vm_job(job_id=job_id, status=VMStatus.running.value)
 
-        # ── Clone the golden image ───────────────────────────────────────
+        template_vmid = proxmox.get_clone_template_vmid(os_choice_value)
+        logger.info(
+            "Provisioning job=%d os=%s: cloning template vmid=%d → new vmid=%d",
+            job_id,
+            os_choice_value,
+            template_vmid,
+            vmid,
+        )
+
+        # ── Clone the OS-specific golden template ───────────────────────
         clone_upid = proxmox.clone_vm(
-            template_vmid=proxmox.golden_image_vmid,
+            template_vmid=template_vmid,
             new_vmid=vmid,
             name=vm_name,
             node=node,
@@ -185,11 +192,13 @@ def _provision_vm_background(
         logger.info("VM %d is running.", vmid)
 
         # ── Poll the QEMU guest agent for an IP ──────────────────────────
-        # 300s because cloud-init + DHCP on first boot can be slow.
+        # Linux: cloud-init + DHCP can be slow. Windows (first boot / sysprep):
+        # allow a longer window for the agent to report an address.
+        ip_timeout = 600 if os_choice_value == "windows-11" else 300
         vm_ip = proxmox.get_vm_ip_from_agent(
             vmid=vmid,
             node=node,
-            timeout=300,
+            timeout=ip_timeout,
             poll_interval=5,
         )
 
@@ -202,13 +211,14 @@ def _provision_vm_background(
                 vmid, job_id,
             )
 
+        vm_user, vm_pass = proxmox.get_post_provision_credentials(os_choice_value)
         database.update_vm_job(
             job_id=job_id,
             status=VMStatus.done.value,
             proxmox_response={"vmid": vmid, "result": "OK"},
             vm_ip=vm_ip,
-            vm_username=proxmox.vm_default_username,
-            vm_password=proxmox.vm_default_password,
+            vm_username=vm_user,
+            vm_password=vm_pass,
         )
         logger.info("VM job %d completed (vmid=%d, ip=%s).", job_id, vmid, vm_ip)
         final_status = VMStatus.done.value

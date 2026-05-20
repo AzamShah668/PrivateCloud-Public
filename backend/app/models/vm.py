@@ -52,8 +52,10 @@ class VMStatus(str, Enum):
 
 class OS_Choice(str, Enum):
     """
-    Allowed operating system templates. Add more as you expand the catalog.
-    These map to ISO file names stored on the Proxmox node.
+    Allowed operating system choices for new VMs.
+
+    Linux options clone the Proxmox template at GOLDEN_IMAGE_VMID (default 9000).
+    windows-11 clones WINDOWS_TEMPLATE_VMID (default 9001).
     """
     ubuntu_22  = "ubuntu-22.04"
     ubuntu_24  = "ubuntu-24.04"

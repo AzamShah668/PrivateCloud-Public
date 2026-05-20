@@ -74,7 +74,7 @@ class ProxmoxClient:
     """
 
     # Base URL of the Proxmox API. Port 8006 is the default.
-    API_BASE = "https://{host}:8006/api2/json"
+    API_BASE = "https://{host}{port_suffix}/api2/json"
 
     # Tickets are valid for ~2 hours. We re-auth 5 minutes before expiry.
     TICKET_LIFETIME_MINUTES = 115
@@ -82,6 +82,17 @@ class ProxmoxClient:
     def __init__(self):
         self.host         = os.getenv("PROXMOX_HOST",     "192.168.1.100")
         self.default_node = os.getenv("PROXMOX_NODE",     "home")
+
+
+        # --- NGROK ADJUSTMENT ---
+        # If the host contains 'ngrok-free.dev', we don't need port 8006
+        if "ngrok-free" in self.host:
+            self.port_suffix = "" 
+            self.verify_ssl = True # ngrok provides valid SSL!
+        else:
+            self.port_suffix = ":8006"
+            self.verify_ssl = os.getenv("PROXMOX_VERIFY_SSL", "false").lower() == "true"
+        # ------------------------
 
         # ── Auth method selection ────────────────────────────────────────
         # If PROXMOX_TOKEN_ID is set → use API token auth (preferred).
@@ -107,14 +118,21 @@ class ProxmoxClient:
         self._ticket_expiry: Optional[datetime] = None
 
         # ── Golden image config ──────────────────────────────────────────
-        # VMID of the golden image template to clone new VMs from.
-        # Set GOLDEN_IMAGE_VMID in your .env (default: 9000).
+        # VMID of the Linux (cloud-init) golden template — cloned for
+        # ubuntu-*, debian-*, centos-* OS choices. Default 9000.
         self.golden_image_vmid: int = int(os.getenv("GOLDEN_IMAGE_VMID", "9000"))
+        # Windows 11 template VMID — cloned only when os_choice is windows-11.
+        self.windows_template_vmid: int = int(os.getenv("WINDOWS_TEMPLATE_VMID", "9001"))
 
-        # Default SSH credentials baked into the golden image.
+        # Default SSH credentials baked into the Linux golden image.
         # These are returned to the user after VM creation so they can log in.
         self.vm_default_username: str = os.getenv("VM_DEFAULT_USERNAME", "ubuntu")
         self.vm_default_password: str = os.getenv("VM_DEFAULT_PASSWORD", "")
+
+        # Optional: credentials for the Windows golden template (falls back to
+        # VM_DEFAULT_* if unset so a single .env still works for one-OS labs).
+        self.vm_windows_username: str = os.getenv("VM_WINDOWS_USERNAME") or self.vm_default_username
+        self.vm_windows_password: str = os.getenv("VM_WINDOWS_PASSWORD") or self.vm_default_password
 
         # Suppress urllib3's "InsecureRequestWarning" when verify_ssl=False
         if not self.verify_ssl:
@@ -125,6 +143,23 @@ class ProxmoxClient:
             logger.info("ProxmoxClient using API token auth (no ticket renewal needed).")
         else:
             logger.info("ProxmoxClient using legacy ticket auth (PROXMOX_TOKEN_ID not set).")
+
+    def get_clone_template_vmid(self, os_choice: str) -> int:
+        """
+        Return the Proxmox template VMID to clone for this OS.
+
+        Linux family uses GOLDEN_IMAGE_VMID (default 9000). Windows 11 uses
+        WINDOWS_TEMPLATE_VMID (default 9001).
+        """
+        if os_choice == "windows-11":
+            return self.windows_template_vmid
+        return self.golden_image_vmid
+
+    def get_post_provision_credentials(self, os_choice: str) -> tuple[str, str]:
+        """Username/password stored on the job for the user to log in after provisioning."""
+        if os_choice == "windows-11":
+            return self.vm_windows_username, self.vm_windows_password
+        return self.vm_default_username, self.vm_default_password
 
     # =========================================================================
     # ── Authentication ────────────────────────────────────────────────────────
@@ -202,21 +237,23 @@ class ProxmoxClient:
         return {"PVEAuthCookie": self._ticket}
 
     def _get_headers(self) -> Dict[str, str]:
-        """
-        Return headers needed for API requests.
-        - Token auth: Authorization header on ALL requests (GET, POST, DELETE, etc.)
-        - Ticket auth: CSRFPreventionToken on state-changing requests only
-        """
+        headers = {}
+        
+        # 1. Add the ngrok bypass header
+        headers["ngrok-skip-browser-warning"] = "true"
+
+        # 2. Add Auth
         if self._use_token_auth:
-            # Proxmox token format: PVEAPIToken=user@realm!tokenname=uuid-secret
-            return {
-                "Authorization": f"PVEAPIToken={self._token_id}={self._token_secret}"
-            }
-        return {"CSRFPreventionToken": self._csrf_token}
+            headers["Authorization"] = f"PVEAPIToken={self._token_id}={self._token_secret}"
+        else:
+            headers["CSRFPreventionToken"] = self._csrf_token
+            
+        return headers
 
     def _url(self, path: str) -> str:
-        """Build the full API URL for a given path."""
-        base = f"https://{self.host}:8006/api2/json"
+        """Build the full API URL."""
+        # Use the dynamic port suffix (blank for ngrok, :8006 for local)
+        base = f"https://{self.host}{self.port_suffix}/api2/json"
         return f"{base}/{path.lstrip('/')}"
 
     def _get(self, path: str) -> Any:

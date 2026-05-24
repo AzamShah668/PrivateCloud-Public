@@ -318,6 +318,12 @@ def create_user(
     """
     with _conn() as conn:
         with _dict_cursor(conn) as cur:
+            # Auto-promote the very first user to admin
+            cur.execute("SELECT COUNT(*) AS c FROM users")
+            user_count = cur.fetchone()["c"]
+            if user_count == 0:
+                role = "admin"
+
             cur.execute(
                 """
                 INSERT INTO users (username, password_hash, role, daily_quota, created_at)

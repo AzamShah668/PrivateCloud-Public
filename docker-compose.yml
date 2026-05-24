@@ -80,6 +80,32 @@ services:
       - proxmox_net
 
 
+  # ── Redis (Celery message broker + result backend) ──────────────────────────
+  # Celery uses Redis as the queue: FastAPI pushes tasks here, and the
+  # celery-worker container pulls them off for execution.
+  redis:
+    image: redis:7-alpine
+
+    container_name: proxmox_redis
+
+    restart: unless-stopped
+
+    ports:
+      - "6379:6379"
+
+    volumes:
+      - redis_data:/data
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+    networks:
+      - proxmox_net
+
+
   # ── FastAPI Backend ─────────────────────────────────────────────────────────
   backend:
     build:
@@ -102,6 +128,8 @@ services:
       # the backend must use "postgres" (the service name) not "localhost".
       DB_HOST: postgres
       DB_PORT: "5432"
+      # Celery broker — the backend pushes tasks to this Redis URL
+      CELERY_BROKER_URL: redis://redis:6379/0
       # Apache Guacamole (HTML5 RDP) — same compose stack
       GUACAMOLE_API_URL: http://guacamole:8080/guacamole
       GUACAMOLE_PUBLIC_URL: http://localhost:9080/guacamole
@@ -117,6 +145,8 @@ services:
         # Prevents "password authentication failed" errors caused by the
         # backend starting before Postgres has finished initialising.
         condition: service_healthy
+      redis:
+        condition: service_healthy
       guacamole:
         condition: service_started
 
@@ -131,6 +161,60 @@ services:
       - ./db:/home/appuser/app/db
 
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+
+  # ── Celery Worker ───────────────────────────────────────────────────────────
+  # Runs the same Docker image as the backend but starts Celery instead of
+  # uvicorn.  This is where the slow VM provisioning tasks actually execute.
+  # It shares the same .env, same codebase, same database — just a different
+  # entrypoint command.
+  celery-worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+
+    container_name: proxmox_celery_worker
+
+    restart: unless-stopped
+
+    env_file:
+      - ./.env
+
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      CELERY_BROKER_URL: redis://redis:6379/0
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    networks:
+      - proxmox_net
+
+    # Mount the same source code so hot-reload works in development.
+    volumes:
+      - ./backend/app:/home/appuser/app/app
+      - ./db:/home/appuser/app/db
+
+    # Override the Dockerfile healthcheck — the Celery container doesn't run
+    # uvicorn, so the inherited "curl localhost:8000" will always fail.
+    # Instead, ask Celery itself whether its worker is alive.
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.celery_app:celery_app inspect ping --timeout 5 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+    # Start Celery instead of uvicorn.
+    # -A app.celery_app:celery_app  → import the Celery app from celery_app.py
+    # worker                         → run as a worker (pull tasks from Redis)
+    # --loglevel=info                → show task pickup/completion in logs
+    # --concurrency=2                → max 2 VM provisions at once (protects Proxmox)
+    command: ["celery", "-A", "app.celery_app:celery_app", "worker", "--loglevel=info", "--concurrency=2"]
 
 
   # ── Apache Guacamole (guacd + MySQL + web app) ─────────────────────────────
@@ -218,3 +302,4 @@ networks:
 volumes:
   postgres_data:
   mysql_guacamole_data:
+  redis_data:

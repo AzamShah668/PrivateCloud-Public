@@ -30,3 +30,7 @@ python-multipart>=0.0.9    # FastAPI uses this to parse form-encoded bodies
 
 # - LLM ChatOps (OpenAI function calling)
 openai>=1.50.0
+
+# ── Task Queue (Celery + Redis) ──────────────────────────────────────────────
+celery>=5.4.0              # Distributed task queue for async VM provisioning
+redis>=5.0.0               # Python client for Redis (Celery broker + backend)

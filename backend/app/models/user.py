@@ -46,7 +46,9 @@ class UserCreate(BaseModel):
     # role is optional — clients can't set themselves to 'admin'.
     # Only an existing admin can upgrade a user (future sprint).
     role: str = "user"
-    daily_quota: int = 3
+    # daily_quota=None means "use the platform default from system_settings".
+    # An admin creating a user via this endpoint can still pass an explicit value.
+    daily_quota: Optional[int] = None
 
     # ── Validators ────────────────────────────────────────────────────────
     # @field_validator runs after Pydantic's type check.

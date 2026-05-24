@@ -3,6 +3,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { motion } from "motion/react";
 import { useNavigate, Link } from "react-router-dom";
 import { toast } from "sonner";
+import { HTTPError } from "ky";
 import { loginSchema, type LoginValues } from "@/schemas/auth.schema";
 import { login } from "@/api/auth";
 import { useAuthStore } from "@/stores/auth-store";
@@ -31,8 +32,21 @@ export default function LoginForm() {
       authLogin(res.access_token);
       toast.success("Welcome back");
       navigate("/", { replace: true });
-    } catch {
-      toast.error("Invalid username or password");
+    } catch (err: unknown) {
+      let message = "Invalid username or password";
+      if (err instanceof HTTPError) {
+        try {
+          const body = (await err.response.clone().json()) as { detail?: string };
+          if (err.response.status === 503) {
+            message = body.detail ?? "The platform is currently in maintenance mode. Please try again later.";
+          } else if (body.detail) {
+            message = body.detail;
+          }
+        } catch {
+          // fall through with default message
+        }
+      }
+      toast.error(message);
     } finally {
       setLoading(false);
     }

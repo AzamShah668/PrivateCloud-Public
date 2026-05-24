@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { X, TerminalSquare, Loader2, AlertTriangle, ExternalLink } from "lucide-react";
+import { X, TerminalSquare, Loader2, AlertTriangle, ExternalLink, Monitor } from "lucide-react";
 import Button from "@/components/ui/Button";
 
 interface ConsoleModalProps {
@@ -8,6 +8,17 @@ interface ConsoleModalProps {
   onClose: () => void;
   vmIP: string;
   vmName: string;
+  // i4: OS type drives which console we show.
+  // Linux VMs use ttyd (browser terminal on port 7681).
+  // Windows VMs use Proxmox's built-in noVNC desktop console.
+  osChoice?: string;
+  vmid?: number;
+  proxmoxNode?: string;
+  proxmoxHost?: string;
+}
+
+function isWindowsOS(osChoice: string | undefined): boolean {
+  return Boolean(osChoice && osChoice.toLowerCase().startsWith("windows"));
 }
 
 export default function ConsoleModal({
@@ -15,11 +26,28 @@ export default function ConsoleModal({
   onClose,
   vmIP,
   vmName,
+  osChoice,
+  vmid,
+  proxmoxNode,
+  proxmoxHost,
 }: ConsoleModalProps) {
   const [iframeLoaded, setIframeLoaded] = useState(false);
   const [iframeError, setIframeError] = useState(false);
 
-  const consoleURL = `http://${vmIP}:7681`;
+  const isWindows = isWindowsOS(osChoice);
+
+  // Linux: ttyd terminal served from inside the VM on port 7681.
+  // Windows: Proxmox's built-in noVNC (works without a guest agent because
+  // it taps the QEMU display device directly). Requires the user to be
+  // logged into the Proxmox UI in the same browser so the auth cookie is set.
+  const consoleURL = isWindows
+    ? `https://${proxmoxHost ?? "100.115.131.104"}:8006/?console=kvm&novnc=1&node=${proxmoxNode ?? "pve"}&resize=1&vmid=${vmid ?? ""}`
+    : `http://${vmIP}:7681`;
+
+  const consoleLabel = isWindows ? "Windows Console (noVNC)" : "Web Console";
+  const consoleSubtitle = isWindows
+    ? `${vmName} · noVNC desktop`
+    : `${vmName} · ${vmIP}:7681`;
 
   function handleOpen() {
     setIframeLoaded(false);
@@ -85,16 +113,20 @@ export default function ConsoleModal({
                   className="flex items-center justify-center h-8 w-8 rounded-[var(--radius-md)]"
                   style={{ background: "rgba(10,239,255,0.08)", border: "1px solid rgba(10,239,255,0.15)" }}
                 >
-                  <TerminalSquare className="h-4 w-4 text-accent-cyan" />
+                  {isWindows ? (
+                    <Monitor className="h-4 w-4 text-accent-cyan" />
+                  ) : (
+                    <TerminalSquare className="h-4 w-4 text-accent-cyan" />
+                  )}
                 </div>
                 <div>
                   <h2
                     className="text-sm font-bold text-primary leading-none"
                     style={{ fontFamily: "var(--font-display)" }}
                   >
-                    Web Console
+                    {consoleLabel}
                   </h2>
-                  <p className="text-[10px] text-muted mt-0.5 font-mono">{vmName} · {vmIP}:7681</p>
+                  <p className="text-[10px] text-muted mt-0.5 font-mono">{consoleSubtitle}</p>
                 </div>
               </div>
 
@@ -138,10 +170,21 @@ export default function ConsoleModal({
                 <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 px-8 text-center">
                   <AlertTriangle className="h-7 w-7 text-accent-yellow" />
                   <div>
-                    <p className="text-sm text-primary font-medium mb-1">Unable to reach ttyd</p>
+                    <p className="text-sm text-primary font-medium mb-1">
+                      {isWindows ? "Unable to load Proxmox noVNC" : "Unable to reach ttyd"}
+                    </p>
                     <p className="text-xs text-secondary">
-                      Make sure the VM is running and ttyd is active on port 7681.<br />
-                      It may still be booting — wait a few seconds and try again.
+                      {isWindows ? (
+                        <>
+                          Sign in to the Proxmox UI in this browser first, then retry.<br />
+                          Or click "Open in Tab" below to launch the console directly.
+                        </>
+                      ) : (
+                        <>
+                          Make sure the VM is running and ttyd is active on port 7681.<br />
+                          It may still be booting — wait a few seconds and try again.
+                        </>
+                      )}
                     </p>
                   </div>
                   <Button

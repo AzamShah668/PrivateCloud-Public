@@ -17,6 +17,17 @@ export interface AdminStats {
   vms_created_today: number;
 }
 
+/** Extended user row with I3 soft-delete fields. */
+export interface AdminUser {
+  id: number;
+  username: string;
+  role: string;
+  daily_quota: number;
+  created_at: string;
+  deleted_at: string | null;
+  status: "active" | "suspended" | "deleted";
+}
+
 export interface VMJobAdmin {
   id: number;
   user_id: number;
@@ -39,10 +50,34 @@ export interface AuditLog {
   id: number;
   user_id: number;
   action: string;
+  action_type: string;
   target_type: string;
   target_id: string | null;
+  target_user_id: number | null;
+  actor_username: string | null;
+  target_username: string | null;
   details: Record<string, unknown>;
   created_at: string;
+}
+
+export type SettingValueType = "string" | "integer" | "boolean" | "json";
+
+export interface PlatformSetting {
+  key: string;
+  value: string;
+  value_type: SettingValueType;
+  typed_value: unknown;
+  description: string | null;
+  updated_at: string;
+  updated_by: number | null;
+  updated_by_username: string | null;
+}
+
+export interface AuditLogFilters {
+  actionType?: string;
+  targetUserId?: number;
+  limit?: number;
+  offset?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -53,16 +88,33 @@ export async function getAdminStats(): Promise<AdminStats> {
   return api.get("admin/stats").json<AdminStats>();
 }
 
-export async function listAllUsers(): Promise<UserResponse[]> {
-  return api.get("admin/users").json<UserResponse[]>();
+export async function listAllUsers(
+  includeDeleted = false,
+): Promise<AdminUser[]> {
+  const searchParams = includeDeleted ? { include_deleted: "true" } : undefined;
+  return api
+    .get("admin/users", { searchParams })
+    .json<AdminUser[]>();
 }
 
 export async function listAllVMs(): Promise<VMJobAdmin[]> {
   return api.get("admin/vms").json<VMJobAdmin[]>();
 }
 
-export async function listAuditLogs(): Promise<AuditLog[]> {
-  return api.get("admin/audit-logs").json<AuditLog[]>();
+export async function listAuditLogs(
+  filters: AuditLogFilters = {},
+): Promise<AuditLog[]> {
+  const searchParams: Record<string, string> = {};
+  if (filters.actionType) searchParams.action_type = filters.actionType;
+  if (filters.targetUserId !== undefined)
+    searchParams.target_user_id = String(filters.targetUserId);
+  if (filters.limit !== undefined) searchParams.limit = String(filters.limit);
+  if (filters.offset !== undefined) searchParams.offset = String(filters.offset);
+  return api
+    .get("admin/audit-logs", {
+      searchParams: Object.keys(searchParams).length ? searchParams : undefined,
+    })
+    .json<AuditLog[]>();
 }
 
 export async function updateUserRole(
@@ -81,4 +133,39 @@ export async function updateUserQuota(
   return api
     .patch(`admin/users/${userId}/quota`, { json: { daily_quota: dailyQuota } })
     .json<UserResponse>();
+}
+
+// --- I3: User lifecycle actions ---------------------------------------------
+
+export async function suspendUser(userId: number): Promise<AdminUser> {
+  return api
+    .post(`admin/users/${userId}/suspend`)
+    .json<AdminUser>();
+}
+
+export async function deleteUser(userId: number): Promise<AdminUser> {
+  return api
+    .post(`admin/users/${userId}/delete`)
+    .json<AdminUser>();
+}
+
+export async function reactivateUser(userId: number): Promise<AdminUser> {
+  return api
+    .post(`admin/users/${userId}/reactivate`)
+    .json<AdminUser>();
+}
+
+// --- I3: Platform settings --------------------------------------------------
+
+export async function listSettings(): Promise<PlatformSetting[]> {
+  return api.get("admin/settings").json<PlatformSetting[]>();
+}
+
+export async function updateSetting(
+  key: string,
+  value: unknown,
+): Promise<PlatformSetting> {
+  return api
+    .patch(`admin/settings/${encodeURIComponent(key)}`, { json: { value } })
+    .json<PlatformSetting>();
 }

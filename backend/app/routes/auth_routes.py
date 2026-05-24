@@ -95,7 +95,8 @@ def register(user_data: UserCreate):
             "username": "azam",
             "password": "securepassword123",
             "role": "user",          # optional, defaults to "user"
-            "daily_quota": 3         # optional, defaults to 3
+            "daily_quota": 3         # optional; if omitted uses the
+                                     # 'quota.default_daily' platform setting
         }
 
     Returns the created user (without the password hash).
@@ -114,13 +115,24 @@ def register(user_data: UserCreate):
     # ── Step 2: hash the password (NEVER store plain text) ────────────────
     hashed = hash_password(user_data.password)
 
-    # ── Step 3: create the database object ──────────────────────
+    # ── Step 3: resolve daily_quota from the platform-wide setting ────────
+    # If the caller did not pass daily_quota explicitly, we fall back to the
+    # 'quota.default_daily' system setting. This lets an admin change the
+    # default for future signups from the Admin → Settings page without a
+    # redeploy. The final safety net (3) covers the case where the setting
+    # row is missing or unreadable.
+    if user_data.daily_quota is not None:
+        effective_quota = user_data.daily_quota
+    else:
+        effective_quota = database.get_setting("quota.default_daily") or 3
+
+    # ── Step 4: create the database object ──────────────────────
     try:
         new_user_id = database.create_user(
             username=user_data.username,
             password_hash=hashed,
             role=user_data.role,
-            daily_quota=user_data.daily_quota,
+            daily_quota=effective_quota,
         )
     except psycopg2.errors.UniqueViolation:
         raise HTTPException(
@@ -180,7 +192,27 @@ def login(
     username = form_data.username.strip().lower()
     user_dict = database.get_user_by_username(username)
 
-    # ── Step 2: verify password ───────────────────────────────────────────
+    # ── Step 2: maintenance-mode gate ─────────────────────────────────────
+    # If an admin has flipped 'platform.maintenance' to true, block any
+    # non-admin login attempt with 503 so the user sees the real reason
+    # (and doesn't get a misleading "wrong password" message). Admins can
+    # still log in to flip the setting back.
+    if database.get_setting("platform.maintenance"):
+        is_admin = bool(user_dict) and user_dict.get("role") == "admin"
+        if not is_admin:
+            logger.info(
+                "Blocking login for '%s' — platform.maintenance is enabled.",
+                username,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    "The platform is currently in maintenance mode. "
+                    "Please try again later."
+                ),
+            )
+
+    # ── Step 3: verify password ───────────────────────────────────────────
     # IMPORTANT: we check both user existence AND password in one condition.
     # This prevents "username enumeration" attacks where an attacker can
     # tell from the error message whether a username exists or not.

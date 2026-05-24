@@ -39,9 +39,10 @@ import logging
 import time
 from typing import List
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Response
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 
 from app.auth import get_current_user
+from app.tasks.vm_tasks import provision_vm as provision_vm_task
 from db import database
 from app.models.user import UserInDB
 from app.models.vm import (
@@ -121,145 +122,9 @@ def check_daily_quota(user: UserInDB) -> None:
 # POST /vms/  — Create a new VM
 # =============================================================================
 
-# =============================================================================
-# Background worker: actually provision the VM on Proxmox.
-# Runs AFTER the HTTP response is sent to the client, so slow steps
-# (clone + boot + IP polling) do not block the request.
-# =============================================================================
-
-def _provision_vm_background(
-    job_id: int,
-    vmid: int,
-    user_id: int,
-    vm_name: str,
-    os_choice_value: str,
-    cpu_cores: int,
-    ram_mb: int,
-    node: str,
-) -> None:
-    """
-    Do the slow Proxmox work out of band:
-      1. Clone the correct golden template for the requested OS (Linux vs Windows).
-      2. Apply CPU / RAM config.
-      3. Start the VM (wait for start task).
-      4. Poll the QEMU guest agent for an IP (generous timeout).
-      5. Persist status=done with IP + credentials, or status=failed with error.
-      6. Write an audit log entry.
-
-    IP polling: 300s for Linux (cloud-init + DHCP); 600s for Windows 11.
-    """
-    try:
-        database.update_vm_job(job_id=job_id, status=VMStatus.running.value)
-
-        template_vmid = proxmox.get_clone_template_vmid(os_choice_value)
-        logger.info(
-            "Provisioning job=%d os=%s: cloning template vmid=%d → new vmid=%d",
-            job_id,
-            os_choice_value,
-            template_vmid,
-            vmid,
-        )
-
-        # ── Clone the OS-specific golden template ───────────────────────
-        clone_upid = proxmox.clone_vm(
-            template_vmid=template_vmid,
-            new_vmid=vmid,
-            name=vm_name,
-            node=node,
-        )
-        logger.info(
-            "Waiting for clone task to finish (job=%d, vmid=%d, upid=%s)…",
-            job_id, vmid, clone_upid,
-        )
-        proxmox.wait_for_task(node=node, upid=clone_upid, timeout=300)
-        logger.info("Clone complete for vmid=%d.", vmid)
-
-        # ── Apply requested CPU / RAM ────────────────────────────────────
-        proxmox.update_vm_config(
-            vmid=vmid,
-            node=node,
-            cores=cpu_cores,
-            memory=ram_mb,
-        )
-        logger.info(
-            "VM %d configured: %d cores, %d MB RAM.", vmid, cpu_cores, ram_mb
-        )
-
-        # ── Start the VM ─────────────────────────────────────────────────
-        start_upid = proxmox.start_vm(vmid=vmid, node=node)
-        logger.info("Waiting for VM %d to start (upid=%s)…", vmid, start_upid)
-        proxmox.wait_for_task(node=node, upid=start_upid, timeout=120)
-        logger.info("VM %d is running.", vmid)
-
-        # ── Poll the QEMU guest agent for an IP ──────────────────────────
-        # Linux: cloud-init + DHCP can be slow. Windows (first boot / sysprep):
-        # allow a longer window for the agent to report an address.
-        ip_timeout = 600 if os_choice_value == "windows-11" else 300
-        vm_ip = proxmox.get_vm_ip_from_agent(
-            vmid=vmid,
-            node=node,
-            timeout=ip_timeout,
-            poll_interval=5,
-        )
-
-        if vm_ip:
-            logger.info("VM %d (job %d) got IP: %s", vmid, job_id, vm_ip)
-        else:
-            logger.warning(
-                "IP polling timed out for vmid=%d (job=%d). "
-                "VM is running but guest agent never reported an IP.",
-                vmid, job_id,
-            )
-
-        vm_user, vm_pass = proxmox.get_post_provision_credentials(os_choice_value)
-        database.update_vm_job(
-            job_id=job_id,
-            status=VMStatus.done.value,
-            proxmox_response={"vmid": vmid, "result": "OK"},
-            vm_ip=vm_ip,
-            vm_username=vm_user,
-            vm_password=vm_pass,
-        )
-        logger.info("VM job %d completed (vmid=%d, ip=%s).", job_id, vmid, vm_ip)
-        final_status = VMStatus.done.value
-        final_error = None
-
-    except ProxmoxAPIError as exc:
-        logger.error("Proxmox API error for job %d: %s", job_id, exc)
-        database.update_vm_job(
-            job_id=job_id,
-            status=VMStatus.failed.value,
-            error_message=str(exc),
-        )
-        final_status = VMStatus.failed.value
-        final_error = str(exc)
-
-    except Exception as exc:
-        logger.error("Unexpected error for job %d: %s", job_id, exc)
-        database.update_vm_job(
-            job_id=job_id,
-            status=VMStatus.failed.value,
-            error_message=f"Unexpected server error: {exc}",
-        )
-        final_status = VMStatus.failed.value
-        final_error = f"Unexpected server error: {exc}"
-
-    # Audit log (best-effort — wrapped inside log_event)
-    updated = database.get_vm_job(job_id) or {}
-    log_event(
-        user_id=user_id,
-        action="vm.create",
-        target_type="vm_job",
-        target_id=str(job_id),
-        details={
-            "vmid":      vmid,
-            "vm_name":   vm_name,
-            "os_choice": os_choice_value,
-            "status":    final_status,
-            "ip":        updated.get("vm_ip"),
-            "error":     final_error,
-        },
-    )
+# The heavy provisioning logic (clone → start → IP polling) has been moved
+# to app/tasks/vm_tasks.py and runs as a Celery task in a separate worker
+# process.  See provision_vm_task (imported above).
 
 
 @router.post(
@@ -274,17 +139,16 @@ def _provision_vm_background(
 )
 def create_vm(
     vm_request: VMCreateRequest,
-    background_tasks: BackgroundTasks,
     current_user: UserInDB = Depends(get_current_user),
 ):
     """
-    Request a new VM. Returns immediately with status='queued' and kicks
-    the slow provisioning work (clone → start → IP polling) off into a
-    background task. The client should poll GET /vms/{job_id} until
-    status becomes 'done' (IP + credentials filled in) or 'failed'.
+    Request a new VM. Returns immediately with status='queued' and pushes
+    the slow provisioning work (clone → start → IP polling) into a Celery
+    task queue (backed by Redis). The client should poll GET /vms/{job_id}
+    until status becomes 'done' (IP + credentials filled in) or 'failed'.
 
-    This avoids the frontend timing out on the 5+ minute first-boot path
-    while still guaranteeing the IP is eventually populated.
+    The Celery worker runs in a separate container, so even if the FastAPI
+    web server restarts, provisioning jobs keep running.
     """
 
     # ── Fast, synchronous checks before accepting the job ─────────────────
@@ -319,13 +183,14 @@ def create_vm(
     )
 
     logger.info(
-        "VM job %d queued for user '%s' (vmid=%d, os=%s) — provisioning in background.",
+        "VM job %d queued for user '%s' (vmid=%d, os=%s) — dispatching to Celery.",
         job_id, current_user.username, vmid, vm_request.os_choice,
     )
 
-    # ── Kick the heavy lifting into the background ───────────────────────
-    background_tasks.add_task(
-        _provision_vm_background,
+    # ── Push the task into the Celery queue (Redis) ──────────────────────
+    # .delay() serialises the arguments as JSON and publishes them to Redis.
+    # A Celery worker process will pick it up and execute provision_vm().
+    provision_vm_task.delay(
         job_id=job_id,
         vmid=vmid,
         user_id=current_user.id,

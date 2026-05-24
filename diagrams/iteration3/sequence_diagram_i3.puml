@@ -1,0 +1,201 @@
+@startuml sequence_diagram_i3
+' =============================================================================
+' PrivateCloud — Iteration 3 Sequence Diagrams
+' Four key I3 flows in one file:
+'   1. Admin: Soft-delete user
+'   2. User:  View / Update own profile (GET + PATCH /auth/me)
+'   3. User:  Get enriched VM details (with live Proxmox status)
+'   4. Admin: Update a system setting
+' =============================================================================
+
+title PrivateCloud — Iteration 3 Sequence Diagrams
+
+skinparam shadowing false
+skinparam sequenceArrowThickness 1.4
+skinparam sequenceMessageAlign center
+skinparam ParticipantPadding 18
+skinparam BoxPadding 14
+skinparam sequence {
+    LifeLineBorderColor #6B7B8C
+    LifeLineBackgroundColor #F2F4F7
+    ParticipantBackgroundColor #EAF4FF
+    ParticipantBorderColor #4A78B8
+    ActorBackgroundColor #FFF1D6
+    ActorBorderColor #B58A2B
+}
+
+' =============================================================================
+' Common participants reused across all four flows
+' =============================================================================
+actor "User /\nAdmin (Browser)" as U
+participant "React Frontend" as FE
+participant "FastAPI\n(AuthRouter / VMRouter / AdminRouter)" as API
+participant "AuthDependencies\n(get_current_user /\nrequire_admin)" as AUTH
+database  "PostgreSQL\n(users, vm_jobs,\naudit_logs, system_settings)" as DB
+participant "ProxmoxClient" as PX
+participant "Proxmox VE" as PVE
+
+
+' =============================================================================
+' FLOW 1 — Admin soft-delete user
+' =============================================================================
+== 1. Admin: Soft-delete a user ==
+
+U  -> FE  : Click "Delete user #42"
+FE -> API : POST /admin/users/42/delete\nAuthorization: Bearer <admin-jwt>
+activate API
+
+API -> AUTH : require_admin(token)
+activate AUTH
+AUTH -> DB  : SELECT * FROM users WHERE id = :admin_id
+DB   --> AUTH : admin row (role='admin', status='active')
+AUTH --> API : current admin user
+deactivate AUTH
+
+API -> DB : SELECT * FROM users WHERE id = 42
+DB  --> API : target user row
+
+alt target not found OR already deleted
+    API --> FE : 404 / 409
+    FE  --> U  : Show error toast
+else target valid
+    API -> DB : UPDATE users\n   SET status = 'deleted',\n       deleted_at = NOW()\n WHERE id = 42
+    DB  --> API : 1 row updated
+
+    API -> DB : INSERT INTO audit_logs\n  (user_id, action, action_type,\n   target_type, target_id, target_user_id, details)\n VALUES (:admin_id, 'user.delete', 'user.delete',\n         'user', '42', 42, '{...}'::jsonb)
+    DB  --> API : audit row id
+
+    API --> FE : 200 { id:42, status:'deleted', deleted_at:... }
+    FE  --> U  : Update users table → row marked Deleted
+end
+deactivate API
+
+
+' =============================================================================
+' FLOW 2 — User view + update own profile (/auth/me)
+' =============================================================================
+== 2. User: View and Update profile ==
+
+U  -> FE  : Open "My Profile" page
+FE -> API : GET /auth/me\nAuthorization: Bearer <user-jwt>
+activate API
+
+API -> AUTH : get_current_user(token)
+activate AUTH
+AUTH -> DB  : SELECT * FROM users WHERE id = :sub
+DB   --> AUTH : user row
+AUTH --> API : UserInDB
+deactivate AUTH
+
+API --> FE : 200 UserResponse {id, username, role, daily_quota, created_at}
+FE  --> U  : Render profile form
+deactivate API
+
+== ...user edits username + password ==
+
+U  -> FE  : Submit updated username + new password\n+ current password
+FE -> API : PATCH /auth/me\n{username, current_password, new_password}
+activate API
+
+API -> AUTH : get_current_user(token)
+activate AUTH
+AUTH --> API : UserInDB (with password_hash)
+deactivate AUTH
+
+alt new_password provided but current_password missing/wrong
+    API --> FE : 400 "current_password required" /\n401 "password mismatch"
+    FE  --> U : Show inline error
+else valid request
+    API -> API : verify_password(current, hash)
+    API -> API : hash_password(new_password)
+    API -> DB  : UPDATE users SET username=:u, password_hash=:h\n WHERE id=:sub
+    DB  --> API : 1 row updated
+
+    API -> DB  : INSERT INTO audit_logs\n (user_id, action, action_type, target_type, target_id, details)\n VALUES (:sub, 'profile.update', 'user.update',\n         'user', :sub, '{"changed":["username","password"]}')
+    DB  --> API : audit row id
+
+    API --> FE : 200 UserResponse (updated)
+    FE  --> U : "Profile updated" toast + refreshed form
+end
+deactivate API
+
+
+' =============================================================================
+' FLOW 3 — User: Get enriched VM details (with live Proxmox status)
+' =============================================================================
+== 3. User: Get enriched VM details ==
+
+U  -> FE  : Open VM detail page for job 17
+FE -> API : GET /vms/17\nAuthorization: Bearer <user-jwt>
+activate API
+
+API -> AUTH : get_current_user(token)
+activate AUTH
+AUTH --> API : UserInDB
+deactivate AUTH
+
+API -> DB : SELECT * FROM vm_jobs\n WHERE id=17 AND user_id=:sub
+DB  --> API : vm_job row (status, vmid, vm_ip, vm_username, vm_password, ...)
+
+alt row not found
+    API --> FE : 404 "VM not found or not yours"
+    FE  --> U  : Show error
+else row found AND status in (queued, failed, deleted)
+    note right of API
+      No live Proxmox call needed —
+      job hasn't been provisioned, or is gone.
+    end note
+    API --> FE : 200 VMEnrichedResponse\n(proxmox_status = null)
+    FE  --> U  : Render with DB-only status
+else row found AND status = done
+    API -> PX : get_vm_status(vmid)
+    activate PX
+    PX -> PVE : GET /api2/json/nodes/{node}/qemu/{vmid}/status/current\nAuthorization: PVEAPIToken=...
+    PVE --> PX : { data: { status: "running", ... } }
+    PX --> API : "running"
+    deactivate PX
+
+    API --> FE : 200 VMEnrichedResponse\n(proxmox_status = "running")
+    FE  --> U  : Render with live status badge\n(SSH details shown if status=done)
+end
+deactivate API
+
+
+' =============================================================================
+' FLOW 4 — Admin: Update a system setting
+' =============================================================================
+== 4. Admin: Update a system setting ==
+
+U  -> FE  : Edit setting "default_daily_quota" → 7
+FE -> API : PATCH /admin/settings/default_daily_quota\n{ "value": "7" }
+activate API
+
+API -> AUTH : require_admin(token)
+activate AUTH
+AUTH -> DB  : SELECT * FROM users WHERE id=:admin_id
+DB   --> AUTH : admin row
+AUTH --> API : current admin user
+deactivate AUTH
+
+API -> DB : SELECT * FROM system_settings\n WHERE key='default_daily_quota'
+DB  --> API : { value:'5', value_type:'integer' }
+
+alt key not found
+    API --> FE : 404 "unknown setting"
+    FE  --> U  : Show error
+else value fails type-check (e.g. 'abc' for integer)
+    API --> FE : 400 "value must be integer"
+    FE  --> U  : Show validation error
+else valid
+    API -> DB : UPDATE system_settings\n    SET value=:v, updated_at=NOW(), updated_by=:admin_id\n  WHERE key=:k
+    DB  --> API : 1 row updated
+
+    API -> DB : INSERT INTO audit_logs\n (user_id, action, action_type, target_type, target_id, details)\n VALUES (:admin_id, 'settings.change', 'settings.change',\n         'setting', 'default_daily_quota',\n         '{"old":"5","new":"7"}')
+    DB  --> API : audit row id
+
+    API --> FE : 200 SettingResponse\n{ key, value:'7', typed_value:7, updated_by_username }
+    FE  --> U  : Settings table refreshed; toast "Saved"
+end
+deactivate API
+
+@enduml

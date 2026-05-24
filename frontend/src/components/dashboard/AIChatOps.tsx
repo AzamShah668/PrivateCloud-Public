@@ -16,18 +16,39 @@ interface Message {
   status?: string;
 }
 
-export default function AIChatOps() {
+const STORAGE_KEY = "azna-chatops-messages";
+const DEFAULT_MSG: Message = {
+  sender: "system",
+  text: "AZNA-CLOUD COGNITIVE ENGINE SECURE CONSOLE READY. DISPATCH PROXMOX PROVISIONING OR lifecycle INSTRUCTIONS.",
+  status: "ready"
+};
+
+function loadMessages(): Message[] {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Message[];
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch { /* ignore corrupt data */ }
+  return [DEFAULT_MSG];
+}
+
+interface AIChatOpsProps {
+  fullHeight?: boolean;
+}
+
+export default function AIChatOps({ fullHeight = false }: AIChatOpsProps = {}) {
   const queryClient = useQueryClient();
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      sender: "system",
-      text: "AZNA-CLOUD COGNITIVE ENGINE SECURE CONSOLE READY. DISPATCH PROXMOX PROVISIONING OR lifecycle INSTRUCTIONS.",
-      status: "ready"
-    }
-  ]);
+  const [messages, setMessages] = useState<Message[]>(loadMessages);
   const [isPending, setIsPending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Persist messages to sessionStorage on every change
+  useEffect(() => {
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+  }, [messages]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -83,7 +104,9 @@ export default function AIChatOps() {
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-      className="glass-panel rounded-xl h-[460px] flex flex-col overflow-hidden border border-border-subtle relative group"
+      className={`glass-panel rounded-xl flex flex-col overflow-hidden border border-border-subtle relative group ${
+        fullHeight ? "h-full min-h-[600px]" : "h-[460px]"
+      }`}
     >
       {/* Brutalist terminal status row top border matrix line */}
       <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-accent-cyan/40 to-transparent" />

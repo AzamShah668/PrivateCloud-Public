@@ -9,6 +9,7 @@ import RegisterPage from "@/pages/RegisterPage";
 import DashboardPage from "@/pages/DashboardPage";
 import CreateVMPage from "@/pages/CreateVMPage";
 import VMDetailPage from "@/pages/VMDetailPage";
+import ChatOpsPage from "@/pages/ChatOpsPage";
 import NotFoundPage from "@/pages/NotFoundPage";
 
 // Admin pages
@@ -50,6 +51,7 @@ export default function App() {
           <Route element={<AppShell />}>
             <Route index element={<DashboardPage />} />
             <Route path="/vms/create" element={<CreateVMPage />} />
+            <Route path="/chatops" element={<ChatOpsPage />} />
             <Route path="/vms/:jobId" element={<VMDetailPage />} />
           </Route>
 

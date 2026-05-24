@@ -5,19 +5,24 @@ All routes require the `require_admin` dependency, which checks
 that the authenticated user has role == 'admin'.
 
 Endpoints:
-  GET  /admin/stats       → aggregate dashboard statistics
-  GET  /admin/users       → list all users
-  GET  /admin/vms         → list all VM jobs (across all users)
-  GET  /admin/audit-logs  → list audit log entries
-  PATCH /admin/users/{id}/role   → change a user's role
-  PATCH /admin/users/{id}/quota  → change a user's daily VM quota
+  GET   /admin/stats                         → aggregate dashboard statistics
+  GET   /admin/users                         → list all users (I3: status + deleted_at)
+  GET   /admin/vms                           → list all VM jobs (across all users)
+  GET   /admin/audit-logs                    → list audit log entries (I3: filterable)
+  PATCH /admin/users/{id}/role               → change a user's role
+  PATCH /admin/users/{id}/quota              → change a user's daily VM quota
+  POST  /admin/users/{id}/suspend            → (I3) set status='suspended'
+  POST  /admin/users/{id}/delete             → (I3) soft-delete user
+  POST  /admin/users/{id}/reactivate         → (I3) restore to status='active'
+  GET   /admin/settings                      → (I3) list all platform settings
+  PATCH /admin/settings/{key}                → (I3) update a setting value
 """
 
 import logging
 from datetime import datetime
-from typing import List, Literal
+from typing import Any, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from app.auth import require_admin
@@ -45,6 +50,19 @@ class AdminStatsResponse(BaseModel):
     vms_created_today: int
 
 
+class AdminUserResponse(BaseModel):
+    """Extended user row with I3 soft-delete fields."""
+    id: int
+    username: str
+    role: str
+    daily_quota: int
+    created_at: datetime
+    deleted_at: datetime | None = None
+    status: str = "active"
+
+    model_config = {"from_attributes": True}
+
+
 class VMJobAdminResponse(BaseModel):
     """VM job with owner username for admin views."""
     id: int
@@ -67,8 +85,12 @@ class AuditLogResponse(BaseModel):
     id: int
     user_id: int
     action: str
+    action_type: str = "system.unknown"
     target_type: str
     target_id: str | None = None
+    target_user_id: int | None = None
+    actor_username: str | None = None
+    target_username: str | None = None
     details: dict
     created_at: datetime
 
@@ -81,6 +103,25 @@ class UpdateRoleRequest(BaseModel):
 
 class UpdateQuotaRequest(BaseModel):
     daily_quota: int = Field(ge=0, le=100)
+
+
+class SettingResponse(BaseModel):
+    key: str
+    value: str
+    value_type: Literal["string", "integer", "boolean", "json"]
+    typed_value: Any
+    description: str | None = None
+    updated_at: datetime
+    updated_by: int | None = None
+    updated_by_username: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class UpdateSettingRequest(BaseModel):
+    # Accept any JSON-compatible scalar / object; we serialize to string
+    # before persisting, matching the value_type column.
+    value: Any
 
 
 # ---------------------------------------------------------------------------
@@ -105,14 +146,18 @@ def get_stats(
 
 @router.get(
     "/users",
-    response_model=List[UserResponse],
-    summary="List all users",
+    response_model=List[AdminUserResponse],
+    summary="List all users (with I3 soft-delete fields)",
 )
 def list_users(
     admin: UserInDB = Depends(require_admin),
-) -> List[UserResponse]:
-    users = database.list_all_users()
-    return [UserResponse.model_validate(u) for u in users]
+    include_deleted: bool = Query(
+        default=False,
+        description="Include soft-deleted users (status='deleted')",
+    ),
+) -> List[AdminUserResponse]:
+    users = database.list_all_users_extended(include_deleted=include_deleted)
+    return [AdminUserResponse.model_validate(u) for u in users]
 
 
 # ---------------------------------------------------------------------------
@@ -138,12 +183,27 @@ def list_all_vms(
 @router.get(
     "/audit-logs",
     response_model=List[AuditLogResponse],
-    summary="List audit log entries",
+    summary="List audit log entries (filterable by action_type + target user)",
 )
 def list_audit_logs(
     admin: UserInDB = Depends(require_admin),
+    action_type: Optional[str] = Query(
+        default=None,
+        description="Filter by action_type enum value (e.g. 'vm.create')",
+    ),
+    target_user_id: Optional[int] = Query(
+        default=None,
+        description="Filter to actions affecting this user",
+    ),
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
 ) -> List[AuditLogResponse]:
-    logs = database.list_audit_logs(limit=200)
+    logs = database.list_audit_logs_filtered(
+        action_type=action_type,
+        target_user_id=target_user_id,
+        limit=limit,
+        offset=offset,
+    )
     return [AuditLogResponse.model_validate(log) for log in logs]
 
 
@@ -161,26 +221,29 @@ def change_user_role(
     body: UpdateRoleRequest,
     admin: UserInDB = Depends(require_admin),
 ) -> UserResponse:
-    # Prevent admins from demoting themselves (could lock out all admins)
     if user_id == admin.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Admins cannot change their own role.",
         )
 
-    updated = database.update_user_role(user_id, body.role)
-    if not updated:
+    old = database.get_user_by_id(user_id)
+    if not old:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User {user_id} not found.",
         )
 
-    database.add_audit_log(
+    updated = database.update_user_role(user_id, body.role)
+
+    database.log_action(
         user_id=admin.id,
-        action="admin.update_role",
+        action_type="user.role_change",
+        action=f"Changed role of user {user_id} from {old['role']} to {body.role}",
         target_type="user",
         target_id=str(user_id),
-        details={"new_role": body.role},
+        target_user_id=user_id,
+        details={"old_role": old["role"], "new_role": body.role},
     )
 
     return UserResponse.model_validate(updated)
@@ -200,20 +263,202 @@ def change_user_quota(
     body: UpdateQuotaRequest,
     admin: UserInDB = Depends(require_admin),
 ) -> UserResponse:
-    # Pydantic Field(ge=0, le=100) handles bounds validation automatically
+    old = database.get_user_by_id(user_id)
+    if not old:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User {user_id} not found.",
+        )
+
     updated = database.update_user_quota(user_id, body.daily_quota)
+
+    database.log_action(
+        user_id=admin.id,
+        action_type="user.quota_change",
+        action=f"Changed quota of user {user_id} from {old['daily_quota']} to {body.daily_quota}",
+        target_type="user",
+        target_id=str(user_id),
+        target_user_id=user_id,
+        details={"old_quota": old["daily_quota"], "new_quota": body.daily_quota},
+    )
+
+    return UserResponse.model_validate(updated)
+
+
+# ---------------------------------------------------------------------------
+# I3: POST /admin/users/{user_id}/suspend
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/users/{user_id}/suspend",
+    response_model=AdminUserResponse,
+    summary="(I3) Suspend a user (status='suspended')",
+)
+def suspend_user(
+    user_id: int,
+    admin: UserInDB = Depends(require_admin),
+) -> AdminUserResponse:
+    if user_id == admin.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Admins cannot suspend themselves.",
+        )
+
+    updated = database.suspend_user(user_id)
     if not updated:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User {user_id} not found.",
         )
 
-    database.add_audit_log(
+    database.log_action(
         user_id=admin.id,
-        action="admin.update_quota",
+        action_type="user.suspend",
+        action=f"Suspended user {updated['username']}",
         target_type="user",
         target_id=str(user_id),
-        details={"new_quota": body.daily_quota},
+        target_user_id=user_id,
+        details={"username": updated["username"]},
     )
 
-    return UserResponse.model_validate(updated)
+    return AdminUserResponse.model_validate(updated)
+
+
+# ---------------------------------------------------------------------------
+# I3: POST /admin/users/{user_id}/delete (soft-delete)
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/users/{user_id}/delete",
+    response_model=AdminUserResponse,
+    summary="(I3) Soft-delete a user (status='deleted', deleted_at=NOW)",
+)
+def delete_user(
+    user_id: int,
+    admin: UserInDB = Depends(require_admin),
+) -> AdminUserResponse:
+    if user_id == admin.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Admins cannot delete themselves.",
+        )
+
+    updated = database.soft_delete_user(user_id)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User {user_id} not found.",
+        )
+
+    database.log_action(
+        user_id=admin.id,
+        action_type="user.delete",
+        action=f"Soft-deleted user {updated['username']}",
+        target_type="user",
+        target_id=str(user_id),
+        target_user_id=user_id,
+        details={"username": updated["username"]},
+    )
+
+    return AdminUserResponse.model_validate(updated)
+
+
+# ---------------------------------------------------------------------------
+# I3: POST /admin/users/{user_id}/reactivate
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/users/{user_id}/reactivate",
+    response_model=AdminUserResponse,
+    summary="(I3) Reactivate a suspended or soft-deleted user",
+)
+def reactivate_user(
+    user_id: int,
+    admin: UserInDB = Depends(require_admin),
+) -> AdminUserResponse:
+    updated = database.reactivate_user(user_id)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User {user_id} not found.",
+        )
+
+    database.log_action(
+        user_id=admin.id,
+        action_type="user.reactivate",
+        action=f"Reactivated user {updated['username']}",
+        target_type="user",
+        target_id=str(user_id),
+        target_user_id=user_id,
+        details={"username": updated["username"]},
+    )
+
+    return AdminUserResponse.model_validate(updated)
+
+
+# ---------------------------------------------------------------------------
+# I3: GET /admin/settings
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/settings",
+    response_model=List[SettingResponse],
+    summary="(I3) List all platform settings",
+)
+def list_platform_settings(
+    admin: UserInDB = Depends(require_admin),
+) -> List[SettingResponse]:
+    return [SettingResponse.model_validate(s) for s in database.list_settings()]
+
+
+# ---------------------------------------------------------------------------
+# I3: PATCH /admin/settings/{key}
+# ---------------------------------------------------------------------------
+
+@router.patch(
+    "/settings/{key}",
+    response_model=SettingResponse,
+    summary="(I3) Update a platform setting value",
+)
+def update_platform_setting(
+    key: str,
+    body: UpdateSettingRequest,
+    admin: UserInDB = Depends(require_admin),
+) -> SettingResponse:
+    # Serialize the incoming value to the TEXT format system_settings expects.
+    # Type coercion happens on read via _cast_setting_value().
+    raw_value = body.value
+    if isinstance(raw_value, bool):
+        str_value = "true" if raw_value else "false"
+    elif isinstance(raw_value, (int, float)):
+        str_value = str(raw_value)
+    elif isinstance(raw_value, (dict, list)):
+        import json as _json
+        str_value = _json.dumps(raw_value)
+    else:
+        str_value = str(raw_value)
+
+    # Record the old value so the audit entry shows the diff
+    old = database.get_setting(key)
+
+    updated = database.set_setting(key, str_value, admin.id)
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"Setting key '{key}' not found. Settings are seeded at "
+                "database init — new keys cannot be created at runtime."
+            ),
+        )
+
+    database.log_action(
+        user_id=admin.id,
+        action_type="settings.change",
+        action=f"Changed setting '{key}'",
+        target_type="setting",
+        target_id=key,
+        target_user_id=None,
+        details={"key": key, "old": old, "new": updated["typed_value"]},
+    )
+
+    return SettingResponse.model_validate(updated)

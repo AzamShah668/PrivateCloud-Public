@@ -8,6 +8,7 @@
 import os
 import json
 import logging
+from collections import deque
 from typing import Any, Dict, List
 
 from openai import AsyncOpenAI
@@ -111,12 +112,18 @@ def get_openai_tools() -> List[Dict[str, Any]]:
     ]
 
 
+# Maximum number of user+assistant turn pairs to keep per user
+MAX_HISTORY_TURNS = 6
+
+
 class CloudAgentService:
     """Orchestration system that evaluates user query intent and maps outputs to services."""
 
     def __init__(self):
         self.api_key = os.getenv("OPENAI_API_KEY")
         self.model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        # Per-user conversation memory: { username: deque([{role, content}, ...]) }
+        self._history: Dict[str, deque] = {}
         if not self.api_key:
             self.client = None
         else:
@@ -125,6 +132,18 @@ class CloudAgentService:
             if base_url:
                 kwargs["base_url"] = base_url
             self.client = AsyncOpenAI(**kwargs)
+
+    def _get_history(self, username: str) -> deque:
+        """Returns the conversation history deque for a given user."""
+        if username not in self._history:
+            self._history[username] = deque(maxlen=MAX_HISTORY_TURNS * 2)
+        return self._history[username]
+
+    def _append_turn(self, username: str, user_msg: str, assistant_msg: str) -> None:
+        """Appends a user+assistant exchange to the conversation history."""
+        history = self._get_history(username)
+        history.append({"role": "user", "content": user_msg})
+        history.append({"role": "assistant", "content": assistant_msg})
 
     async def execute_agent_loop(
         self,
@@ -152,12 +171,15 @@ class CloudAgentService:
         )
 
         try:
+            # Build messages with conversation history for context
+            history = self._get_history(current_user.username)
+            messages = [{"role": "system", "content": system_instruction}]
+            messages.extend(list(history))  # prior turns
+            messages.append({"role": "user", "content": user_prompt})
+
             completion = await self.client.chat.completions.create(
                 model=self.model_name,
-                messages=[
-                    {"role": "system", "content": system_instruction},
-                    {"role": "user", "content": user_prompt},
-                ],
+                messages=messages,
                 tools=tools,
                 tool_choice="auto",
             )
@@ -168,6 +190,8 @@ class CloudAgentService:
 
             if not tool_calls:
                 text = (msg.content or "").strip() or "(No response text from model.)"
+                # Save conversational turn to history
+                self._append_turn(current_user.username, user_prompt, text)
                 return {
                     "response": text,
                     "tool_called": None,
@@ -191,7 +215,10 @@ class CloudAgentService:
                 tool_args = {}
 
             logger.info("LLM Agent tool call: %s with parameters: %s", tool_name, tool_args)
-            return await self._dispatch_tool(tool_name, tool_args, current_user, background_tasks)
+            result = await self._dispatch_tool(tool_name, tool_args, current_user, background_tasks)
+            # Save turn to history
+            self._append_turn(current_user.username, user_prompt, result.get("response", ""))
+            return result
 
         except Exception as err:
             logger.error("AI orchestration error: %s", err, exc_info=True)

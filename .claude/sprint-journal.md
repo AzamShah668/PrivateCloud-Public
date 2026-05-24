@@ -9,6 +9,8 @@
 
 | # | Date | Title | Sprint | File |
 |---|------|-------|--------|------|
+| 016 | 2026-05-24 | Fix Celery Auto-Discovery and Worker Healthcheck | 3 | [016-celery-worker-fix.md](journal/016-celery-worker-fix.md) |
+| 015 | 2026-04-27 | Iteration 3 UML Diagrams (Class + Sequence, PlantUML) | 3 | [015-i3-uml-diagrams.md](journal/015-i3-uml-diagrams.md) |
 | 014 | 2026-04-20 | Admin Portal DB Schema Extensions (I3: 4 additions) | 3 | [014-admin-db-schema-extensions.md](journal/014-admin-db-schema-extensions.md) |
 | 013 | 2026-04-19 | VM Detail Page: Provisioning State UX (fix 409 on Start) | 3 | [013-vm-provisioning-ux.md](journal/013-vm-provisioning-ux.md) |
 | 012 | 2026-04-15 | Code Review: Security & Quality Fixes (2C, 12H, 15M fixed) | 3 | [012-code-review-security-fixes.md](journal/012-code-review-security-fixes.md) |

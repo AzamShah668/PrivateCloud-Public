@@ -2,6 +2,7 @@ import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
   Server,
+  Terminal,
   Bell,
   LogOut,
   ChevronRight,
@@ -14,6 +15,7 @@ import { cn } from "@/lib/cn";
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/vms/create", icon: Server, label: "My Instances" },
+  { to: "/chatops", icon: Terminal, label: "Agent ChatOps" },
 ];
 
 function ACLogo() {

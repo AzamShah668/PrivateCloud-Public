@@ -48,6 +48,7 @@ class VMStatus(str, Enum):
     done    = "done"      # Proxmox confirmed VM creation success
     failed  = "failed"    # something went wrong; check error_message
     deleted = "deleted"   # VM was successfully destroyed on Proxmox
+    expired = "expired"   # i4: 2-hour lease elapsed, auto-stopped by scheduler
 
 
 class OS_Choice(str, Enum):
@@ -199,6 +200,8 @@ class VMJobResponse(BaseModel):
     vm_password:      Optional[str]            = None
     created_at:       datetime
     updated_at:       datetime
+    # i4: 2-hour auto-expire — when this passes, a background task stops the VM
+    expires_at:       Optional[datetime]       = None
 
     model_config = {"from_attributes": True}
 

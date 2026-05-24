@@ -1,0 +1,327 @@
+@startuml class_diagram_i3
+' =============================================================================
+' PrivateCloud — Iteration 3 Class Diagram
+' Scope: Admin Portal, User Profile self-service, Enriched VM details,
+'        System Settings, Soft-delete users, Audit action taxonomy.
+' =============================================================================
+
+title PrivateCloud — Iteration 3 Class Diagram
+
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam classFontStyle bold
+skinparam packageStyle rectangle
+skinparam linetype ortho
+
+skinparam class {
+    BackgroundColor<<schema>>     #EAF4FF
+    BorderColor<<schema>>         #4A78B8
+    BackgroundColor<<router>>     #FFF1D6
+    BorderColor<<router>>         #B58A2B
+    BackgroundColor<<service>>    #E8F6E5
+    BorderColor<<service>>        #3F8E47
+    BackgroundColor<<entity>>     #F4E5FF
+    BorderColor<<entity>>         #6B3FA0
+}
+
+' ---------------------------------------------------------------------------
+' DOMAIN ENTITIES (DB-backed)
+' ---------------------------------------------------------------------------
+package "Domain Entities (DB)" {
+
+    class users <<entity>> {
+        +id : SERIAL <<PK>>
+        +username : VARCHAR(50) <<unique>>
+        +password_hash : VARCHAR(255)
+        +role : VARCHAR(20)
+        +daily_quota : INTEGER
+        +created_at : TIMESTAMP
+        --
+        ' I3 additions
+        +deleted_at : TIMESTAMP <<nullable>>
+        +status : VARCHAR(20) {active|suspended|deleted}
+    }
+
+    class vm_jobs <<entity>> {
+        +id : SERIAL <<PK>>
+        +user_id : INT <<FK users.id>>
+        +vmid : INT
+        +vm_name : VARCHAR(50)
+        +os_choice : VARCHAR(40)
+        +cpu_cores : INT
+        +ram_mb : INT
+        +storage_gb : INT
+        +status : VARCHAR(20)
+        +request_payload : JSONB
+        +proxmox_response : JSONB
+        +error_message : TEXT
+        +vm_ip : VARCHAR(45)
+        +vm_username : VARCHAR(50)
+        +vm_password : VARCHAR(255)
+        +created_at : TIMESTAMP
+        +updated_at : TIMESTAMP
+    }
+
+    class audit_logs <<entity>> {
+        +id : SERIAL <<PK>>
+        +user_id : INT <<FK users.id>>
+        +action : VARCHAR(100)
+        +target_type : VARCHAR(50)
+        +target_id : VARCHAR(100)
+        --
+        ' I3 additions
+        +action_type : VARCHAR(50) {user.*|vm.*|settings.*|auth.*}
+        +target_user_id : INT <<FK users.id, nullable>>
+        +details : JSONB
+        +created_at : TIMESTAMP
+    }
+
+    class system_settings <<entity>> {
+        +key : VARCHAR(100) <<PK>>
+        +value : TEXT
+        +value_type : VARCHAR(20) {string|integer|boolean|json}
+        +description : TEXT
+        +updated_at : TIMESTAMP
+        +updated_by : INT <<FK users.id>>
+    }
+}
+
+' ---------------------------------------------------------------------------
+' PYDANTIC SCHEMAS (request / response DTOs)
+' ---------------------------------------------------------------------------
+package "Pydantic Schemas (I3)" {
+
+    ' --- Auth / profile ---
+    class UserResponse <<schema>> {
+        +id : int
+        +username : str
+        +role : str
+        +daily_quota : int
+        +created_at : datetime
+    }
+
+    class UserUpdateRequest <<schema>> {
+        +username : Optional[str]
+        +current_password : Optional[str]
+        +new_password : Optional[str]
+        +daily_quota : Optional[int]
+        --
+        +username_no_spaces()
+        +new_password_min_length()
+        +quota_positive()
+    }
+
+    ' --- Admin user mgmt ---
+    class AdminUserResponse <<schema>> {
+        +id : int
+        +username : str
+        +role : str
+        +daily_quota : int
+        +created_at : datetime
+        +deleted_at : Optional[datetime]
+        +status : str = "active"
+    }
+
+    class UpdateRoleRequest <<schema>> {
+        +role : Literal["user","admin"]
+    }
+
+    class UpdateQuotaRequest <<schema>> {
+        +daily_quota : int  (0..100)
+    }
+
+    ' --- Admin VM view ---
+    class VMJobAdminResponse <<schema>> {
+        +id : int
+        +user_id : int
+        +owner_username : str
+        +vmid : int
+        +vm_name : str
+        +os_choice : str
+        +status : str
+        +request_payload : dict
+        +proxmox_response : Optional[dict]
+        +error_message : Optional[str]
+        +created_at : datetime
+        +updated_at : datetime
+    }
+
+    ' --- Enriched VM detail (user-facing) ---
+    class VMEnrichedResponse <<schema>> {
+        +id : int
+        +user_id : int
+        +vmid : int
+        +vm_name : str
+        +os_choice : str
+        +status : str
+        +vm_ip : Optional[str]
+        +vm_username : Optional[str]
+        +vm_password : Optional[str]
+        +proxmox_status : Optional[str]
+        +created_at : datetime
+        +updated_at : datetime
+    }
+
+    ' --- Admin dashboard ---
+    class AdminStatsResponse <<schema>> {
+        +total_users : int
+        +total_admins : int
+        +total_vms : int
+        +active_vms : int
+        +failed_vms : int
+        +queued_vms : int
+        +deleted_vms : int
+        +total_audit_entries : int
+        +vms_created_today : int
+    }
+
+    class AuditLogResponse <<schema>> {
+        +id : int
+        +user_id : int
+        +action : str
+        +action_type : str
+        +target_type : str
+        +target_id : Optional[str]
+        +target_user_id : Optional[int]
+        +actor_username : Optional[str]
+        +target_username : Optional[str]
+        +details : dict
+        +created_at : datetime
+    }
+
+    ' --- System settings ---
+    class SettingResponse <<schema>> {
+        +key : str
+        +value : str
+        +value_type : Literal[string|integer|boolean|json]
+        +typed_value : Any
+        +description : Optional[str]
+        +updated_at : datetime
+        +updated_by : Optional[int]
+        +updated_by_username : Optional[str]
+    }
+}
+
+' ---------------------------------------------------------------------------
+' ROUTE HANDLERS (FastAPI routers)
+' ---------------------------------------------------------------------------
+package "Route Handlers" {
+
+    class AuthRouter <<router>> {
+        +POST /auth/register()
+        +POST /auth/login()
+        +GET  /auth/me()                          [I3]
+        +PATCH /auth/me(req: UserUpdateRequest)   [I3]
+    }
+
+    class VMRouter <<router>> {
+        +POST /vms/()
+        +GET  /vms/()                             [I3 enrich]
+        +GET  /vms/{job_id}()                     [I3 enrich]
+        +PATCH /vms/{job_id}()
+        +DELETE /vms/{job_id}()
+    }
+
+    class AdminRouter <<router>> {
+        +GET  /admin/stats()
+        +GET  /admin/users()
+        +GET  /admin/vms()
+        +GET  /admin/audit-logs()
+        +PATCH /admin/users/{id}/role()
+        +PATCH /admin/users/{id}/quota()
+        +POST /admin/users/{id}/suspend()         [I3]
+        +POST /admin/users/{id}/delete()          [I3]
+        +POST /admin/users/{id}/reactivate()      [I3]
+        +GET  /admin/settings()                   [I3]
+        +PATCH /admin/settings/{key}()            [I3]
+    }
+}
+
+' ---------------------------------------------------------------------------
+' SERVICE LAYER
+' ---------------------------------------------------------------------------
+package "Service Layer" {
+
+    class ProxmoxClient <<service>> {
+        -host : str
+        -token_id : str
+        -token_secret : str
+        -session : requests.Session
+        --
+        +_ensure_authenticated()
+        +clone_vm(template_id, new_vmid)
+        +start_vm(vmid)
+        +stop_vm(vmid)
+        +delete_vm(vmid)
+        +resize_vm(vmid, cpu, ram)
+        +get_vm_status(vmid) : str        [I3 used by enrichment]
+        +get_vm_ip(vmid) : str
+        +get_task_status(upid)
+    }
+
+    class Database <<service>> {
+        +get_pool() : ConnectionPool
+        +get_user_by_id(id)
+        +get_user_by_username(name)
+        +update_user(id, **fields)        [I3]
+        +soft_delete_user(id)             [I3]
+        +reactivate_user(id)              [I3]
+        +list_users(include_deleted=False) [I3]
+        +get_vm_job(id)
+        +list_vm_jobs(user_id)
+        +list_all_vm_jobs_with_owner()    [I3]
+        +log_audit(action, action_type, target_type, target_id, target_user_id, details) [I3]
+        +list_audit_logs(filter_action_type)  [I3]
+        +get_setting(key)                 [I3]
+        +list_settings()                  [I3]
+        +update_setting(key, value, by)   [I3]
+    }
+
+    class AuthDependencies <<service>> {
+        +get_current_user() : UserInDB
+        +require_admin() : UserInDB       [I3 used by AdminRouter]
+    }
+}
+
+' ---------------------------------------------------------------------------
+' RELATIONSHIPS
+' ---------------------------------------------------------------------------
+
+' DB FK relationships
+users "1" o-- "*" vm_jobs        : owns
+users "1" o-- "*" audit_logs     : performs (user_id)
+users "1" o-- "*" audit_logs     : targeted by (target_user_id)  [I3]
+users "1" o-- "*" system_settings : last updated by             [I3]
+
+' Pydantic ↔ Entity mapping
+AdminUserResponse  ..> users         : maps from
+VMJobAdminResponse ..> vm_jobs       : maps from + JOIN users
+VMEnrichedResponse ..> vm_jobs       : maps from + live Proxmox
+AuditLogResponse   ..> audit_logs    : maps from + JOIN usernames
+SettingResponse    ..> system_settings : maps from
+UserResponse       ..> users         : maps from
+UserUpdateRequest  ..> users         : updates
+
+' Routers consume schemas
+AuthRouter   ..> UserUpdateRequest     : reads
+AuthRouter   ..> UserResponse          : returns
+VMRouter     ..> VMEnrichedResponse    : returns
+AdminRouter  ..> AdminStatsResponse    : returns
+AdminRouter  ..> AdminUserResponse     : returns
+AdminRouter  ..> VMJobAdminResponse    : returns
+AdminRouter  ..> AuditLogResponse      : returns
+AdminRouter  ..> SettingResponse       : returns
+AdminRouter  ..> UpdateRoleRequest     : reads
+AdminRouter  ..> UpdateQuotaRequest    : reads
+
+' Routers depend on services
+AuthRouter   --> Database              : uses
+VMRouter     --> Database              : uses
+VMRouter     --> ProxmoxClient         : uses (live status)
+AdminRouter  --> Database              : uses
+AdminRouter  --> AuthDependencies      : require_admin
+
+' Auth dependencies on DB
+AuthDependencies --> Database          : loads user from JWT
+
+@enduml

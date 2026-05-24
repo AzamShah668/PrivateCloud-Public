@@ -5,8 +5,14 @@ import {
   listAllUsers,
   listAllVMs,
   listAuditLogs,
+  listSettings,
   updateUserRole,
   updateUserQuota,
+  suspendUser,
+  deleteUser,
+  reactivateUser,
+  updateSetting,
+  type AuditLogFilters,
 } from "@/api/admin";
 import { toast } from "sonner";
 
@@ -29,10 +35,10 @@ export function useAdminStats() {
   });
 }
 
-export function useAdminUsers() {
+export function useAdminUsers(includeDeleted = false) {
   return useQuery({
-    queryKey: ["admin", "users"],
-    queryFn: listAllUsers,
+    queryKey: ["admin", "users", { includeDeleted }],
+    queryFn: () => listAllUsers(includeDeleted),
     refetchInterval: 30_000,
   });
 }
@@ -45,11 +51,19 @@ export function useAdminVMs() {
   });
 }
 
-export function useAdminAuditLogs() {
+export function useAdminAuditLogs(filters: AuditLogFilters = {}) {
   return useQuery({
-    queryKey: ["admin", "audit-logs"],
-    queryFn: listAuditLogs,
+    queryKey: ["admin", "audit-logs", filters],
+    queryFn: () => listAuditLogs(filters),
     refetchInterval: 30_000,
+  });
+}
+
+export function useAdminSettings() {
+  return useQuery({
+    queryKey: ["admin", "settings"],
+    queryFn: listSettings,
+    refetchInterval: 60_000,
   });
 }
 
@@ -85,6 +99,75 @@ export function useUpdateUserQuota() {
     },
     onError: async (err) => {
       toast.error(await extractErrorMessage(err, "Failed to update quota"));
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// I3: User lifecycle mutations
+// ---------------------------------------------------------------------------
+
+export function useSuspendUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: number) => suspendUser(userId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "users"] });
+      qc.invalidateQueries({ queryKey: ["admin", "audit-logs"] });
+      toast.success("User suspended");
+    },
+    onError: async (err) => {
+      toast.error(await extractErrorMessage(err, "Failed to suspend user"));
+    },
+  });
+}
+
+export function useDeleteUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: number) => deleteUser(userId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "users"] });
+      qc.invalidateQueries({ queryKey: ["admin", "stats"] });
+      qc.invalidateQueries({ queryKey: ["admin", "audit-logs"] });
+      toast.success("User deleted");
+    },
+    onError: async (err) => {
+      toast.error(await extractErrorMessage(err, "Failed to delete user"));
+    },
+  });
+}
+
+export function useReactivateUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: number) => reactivateUser(userId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "users"] });
+      qc.invalidateQueries({ queryKey: ["admin", "audit-logs"] });
+      toast.success("User reactivated");
+    },
+    onError: async (err) => {
+      toast.error(await extractErrorMessage(err, "Failed to reactivate user"));
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// I3: Settings mutation
+// ---------------------------------------------------------------------------
+
+export function useUpdateSetting() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ key, value }: { key: string; value: unknown }) =>
+      updateSetting(key, value),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["admin", "settings"] });
+      toast.success(`Setting "${vars.key}" updated`);
+    },
+    onError: async (err) => {
+      toast.error(await extractErrorMessage(err, "Failed to update setting"));
     },
   });
 }

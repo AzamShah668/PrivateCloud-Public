@@ -39,7 +39,7 @@ import logging
 import time
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Response
 
 from app.auth import get_current_user
 from app.tasks.vm_tasks import provision_vm as provision_vm_task
@@ -327,6 +327,62 @@ def get_vm(
                 **(job.get("proxmox_response") or {}),
                 "live_status": live,
             }
+
+            # Opportunistic IP self-heal: if the VM is running but vm_ip is NULL
+            # (e.g. initial Celery provisioning crashed before the IP poll, or
+            # the guest agent was asleep at the time), do a single fast attempt
+            # here. The agent responds in <1s when alive, so a 10s ceiling keeps
+            # the GET cheap. Anything longer happens on the BackgroundTask path
+            # triggered by Start/Restart.
+            if not result.get("vm_ip") and live.get("status") == "running":
+                try:
+                    ip = proxmox.get_vm_ip_from_agent(
+                        vmid=job["vmid"], timeout=10, poll_interval=2
+                    )
+                    if ip:
+                        database.update_vm_job(
+                            job_id=job_id,
+                            status=job["status"],
+                            vm_ip=ip,
+                        )
+                        result["vm_ip"] = ip
+                        logger.info(
+                            "GET self-heal: recovered vm_ip=%s for vmid=%s (job=%d).",
+                            ip, job["vmid"], job_id,
+                        )
+                except Exception as exc:
+                    logger.debug(
+                        "GET self-heal: agent still not responding for vmid=%s (%s).",
+                        job["vmid"], exc,
+                    )
+
+            # Opportunistic credential self-heal: if the initial Celery task
+            # crashed before writing credentials, vm_username/vm_password stay
+            # NULL forever even though the OS choice is known. These come from
+            # env vars (deterministic, no network call), so backfill them here
+            # to keep the Desktop / RDP-on-copy paths unblocked.
+            os_choice = job.get("os_choice")
+            if os_choice and (not result.get("vm_username") or not result.get("vm_password")):
+                try:
+                    creds_user, creds_pass = proxmox.get_post_provision_credentials(os_choice)
+                    if creds_user and creds_pass:
+                        database.update_vm_job(
+                            job_id=job_id,
+                            status=job["status"],
+                            vm_username=creds_user,
+                            vm_password=creds_pass,
+                        )
+                        result["vm_username"] = creds_user
+                        result["vm_password"] = creds_pass
+                        logger.info(
+                            "GET self-heal: backfilled credentials for vmid=%s (job=%d).",
+                            job["vmid"], job_id,
+                        )
+                except Exception as exc:
+                    logger.debug(
+                        "GET self-heal: could not backfill credentials for vmid=%s (%s).",
+                        job["vmid"], exc,
+                    )
         except Exception as exc:
             logger.warning(
                 "Could not fetch live status for vmid=%s: %s", job["vmid"], exc
@@ -336,6 +392,45 @@ def get_vm(
         result["live_status"] = "unknown"
 
     return VMEnrichedResponse.model_validate(result)
+
+
+def _refresh_vm_ip_async(job_id: int, vmid: int, node: str) -> None:
+    """
+    Background recovery for VMs whose initial provisioning never wrote vm_ip.
+
+    Fires after a manual Start/Restart when the job row has vm_ip = NULL.
+    Polls the QEMU guest agent for up to ~3 minutes and, if an IP shows up,
+    writes it back to the vm_jobs row so the frontend banner can clear and
+    the Console/Desktop buttons become enabled.
+
+    Failures are swallowed — this is best-effort recovery, not a critical path.
+    """
+    try:
+        ip = proxmox.get_vm_ip_from_agent(
+            vmid=vmid, node=node, timeout=180, poll_interval=5
+        )
+        if not ip:
+            logger.warning(
+                "Background IP refresh: guest agent never reported for vmid=%d (job=%d).",
+                vmid, job_id,
+            )
+            return
+
+        current = database.get_vm_job(job_id) or {}
+        database.update_vm_job(
+            job_id=job_id,
+            status=current.get("status", VMStatus.done.value),
+            vm_ip=ip,
+        )
+        logger.info(
+            "Background IP refresh: recovered vm_ip=%s for vmid=%d (job=%d).",
+            ip, vmid, job_id,
+        )
+    except Exception as exc:
+        logger.error(
+            "Background IP refresh failed for vmid=%d (job=%d): %s",
+            vmid, job_id, exc,
+        )
 
 
 # =============================================================================
@@ -357,6 +452,7 @@ def update_vm(
     job_id: int,
     update: VMUpdateRequest,
     response: Response,
+    background_tasks: BackgroundTasks,
     current_user: UserInDB = Depends(get_current_user),
 ):
     """
@@ -408,6 +504,14 @@ def update_vm(
         if action == VMAction.start:
             proxmox.start_vm(vmid, node)
             logger.info(f"VM {vmid} start requested by user '{current_user.username}'")
+            # If the initial provisioning never recorded an IP (e.g. it failed at
+            # qm start with a vcpu/resource error), the row stays NULL forever
+            # because nothing else writes vm_ip. Recover it here in the background
+            # so the "VM is running, but no IP was reported" banner can clear.
+            if not job.get("vm_ip"):
+                background_tasks.add_task(
+                    _refresh_vm_ip_async, job_id=job_id, vmid=vmid, node=node
+                )
 
         elif action == VMAction.stop:
             proxmox.stop_vm(vmid, node)
@@ -416,6 +520,10 @@ def update_vm(
         elif action == VMAction.restart:
             proxmox.restart_vm(vmid, node)
             logger.info(f"VM {vmid} restart requested by user '{current_user.username}'")
+            if not job.get("vm_ip"):
+                background_tasks.add_task(
+                    _refresh_vm_ip_async, job_id=job_id, vmid=vmid, node=node
+                )
 
         elif action == VMAction.resize:
             # Build the config update — only include fields that were provided

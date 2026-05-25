@@ -583,7 +583,7 @@ def list_user_vm_jobs(user_id: int, limit: int = 50) -> list[dict]:
     with _conn() as conn:
         with _dict_cursor(conn) as cur:
             cur.execute(
-                "SELECT * FROM vm_jobs WHERE user_id = %s ORDER BY id DESC LIMIT %s",
+                "SELECT * FROM vm_jobs WHERE user_id = %s AND status != 'deleted' ORDER BY id DESC LIMIT %s",
                 (user_id, limit),
             )
             return cur.fetchall()
@@ -1072,3 +1072,4 @@ def set_setting(key: str, value: str, admin_id: int) -> dict | None:
     if row is not None:
         row["typed_value"] = _cast_setting_value(row["value"], row["value_type"])
     return row
+

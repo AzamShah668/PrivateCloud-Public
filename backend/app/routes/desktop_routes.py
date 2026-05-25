@@ -80,7 +80,7 @@ def create_windows_desktop_session(
         )
 
     try:
-        result = guacamole_client.create_windows_desktop_session(
+        result = guacamole_client.create_desktop_session(
             job_id=job_id,
             vm_ip=str(vm_ip),
             vm_username=str(vm_username),

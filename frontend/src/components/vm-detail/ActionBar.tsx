@@ -14,6 +14,7 @@ interface ActionBarProps {
   /** Windows 11: open Guacamole RDP when set */
   onRemoteDesktop?: () => void;
   showRemoteDesktop?: boolean;
+  showConsole?: boolean;
 }
 
 export default function ActionBar({
@@ -28,9 +29,11 @@ export default function ActionBar({
   isPending,
   onRemoteDesktop,
   showRemoteDesktop,
+  showConsole,
 }: ActionBarProps) {
   const isRunning = liveStatus === "running";
   const isStopped = liveStatus === "stopped";
+
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -64,16 +67,18 @@ export default function ActionBar({
         <RotateCw className="h-3.5 w-3.5" />
         Restart
       </Button>
-      <Button
-        variant="secondary"
-        size="sm"
-        onClick={onConsole}
-        disabled={!isRunning || !vmIP || isPending}
-        title={!vmIP ? "IP not yet available" : !isRunning ? "VM must be running" : "Open web console (ttyd)"}
-      >
-        <TerminalSquare className="h-3.5 w-3.5" />
-        Console
-      </Button>
+      {showConsole && (
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={onConsole}
+          disabled={!isRunning || !vmIP || isPending}
+          title={!vmIP ? "IP not yet available" : !isRunning ? "VM must be running" : "Open web console (ttyd)"}
+        >
+          <TerminalSquare className="h-3.5 w-3.5" />
+          Console
+        </Button>
+      )}
       {showRemoteDesktop && onRemoteDesktop && (
         <Button
           variant="secondary"
@@ -96,7 +101,9 @@ export default function ActionBar({
         Resize
       </Button>
 
+
       <div className="flex-1" />
+
 
       <Button
         variant="danger"

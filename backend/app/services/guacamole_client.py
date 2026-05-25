@@ -171,7 +171,7 @@ def delete_stale_privatecloud_connections(token: str, data_source: str, job_id: 
         logger.warning("Could not prune stale Guacamole connections: %s", exc)
 
 
-def create_rdp_connection(
+def create_connection(
     token: str,
     data_source: str,
     *,
@@ -180,27 +180,40 @@ def create_rdp_connection(
     port: int,
     username: str,
     password: str,
+    protocol: str = "rdp",
 ) -> str:
     """
-    Create an RDP connection and return its opaque identifier (for client URL / deletes).
+    Create an RDP or SSH connection and return its opaque identifier (for client URL / deletes).
     """
     base = _api_base()
     url = f"{base}/api/session/data/{data_source}/connections"
-    payload: Dict[str, Any] = {
-        "parentIdentifier": "ROOT",
-        "name": connection_name,
-        "protocol": "rdp",
-        "parameters": {
-            "hostname": hostname,
-            "port": str(port),
-            "username": username,
-            "password": password,
+    
+    params = {
+        "hostname": hostname,
+        "port": str(port),
+        "username": username,
+        "password": password,
+    }
+    
+    if protocol == "rdp":
+        params.update({
             "ignore-cert": "true",
             "security": "nla",
             "disable-auth": "false",
             "enable-wallpaper": "false",
             "create-drive-path": "false",
-        },
+        })
+    elif protocol == "ssh":
+        params.update({
+            "color-scheme": "green-black",
+            "server-alive-interval": "30",
+        })
+
+    payload: Dict[str, Any] = {
+        "parentIdentifier": "ROOT",
+        "name": connection_name,
+        "protocol": protocol,
+        "parameters": params,
         "attributes": {},
     }
     resp = _session().post(url, headers=_headers(token), json=payload, timeout=30)
@@ -211,7 +224,7 @@ def create_rdp_connection(
             resp.text[:800],
         )
         raise GuacamoleAPIError(
-            f"Guacamole could not create RDP connection ({resp.status_code})",
+            f"Guacamole could not create {protocol.upper()} connection ({resp.status_code})",
             status_code=502,
         )
     body = resp.json()
@@ -229,16 +242,17 @@ def build_desktop_client_url(auth_token: str, data_source: str, connection_ident
     return f"{public}/#/client/{enc}?token={tok}"
 
 
-def create_windows_desktop_session(
+def create_desktop_session(
     *,
     job_id: int,
     vm_ip: str,
     vm_username: str,
     vm_password: str,
-    rdp_port: int = 3389,
+    port: int = 3389,
+    protocol: str = "rdp",
 ) -> Dict[str, str]:
     """
-    Prune old connections for this job, create a fresh RDP connection, return URLs.
+    Prune old connections for this job, create a fresh RDP/SSH connection, return URLs.
 
     Returns dict with keys: client_url, connection_name, data_source
     """
@@ -247,14 +261,15 @@ def create_windows_desktop_session(
 
     suffix = uuid.uuid4().hex[:10]
     name = f"pc-job-{job_id}-{suffix}"
-    conn_id = create_rdp_connection(
+    conn_id = create_connection(
         token,
         data_source,
         connection_name=name,
         hostname=vm_ip,
-        port=rdp_port,
+        port=port,
         username=vm_username,
         password=vm_password,
+        protocol=protocol,
     )
     client_url = build_desktop_client_url(token, data_source, conn_id)
     return {

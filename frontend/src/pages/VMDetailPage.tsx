@@ -314,7 +314,7 @@ export default function VMDetailPage() {
             />
           </div>
 
-          {vm.error_message && (
+          {vm.error_message && liveStatus !== "running" && (
             <div className="mt-4 rounded-[var(--radius-md)] bg-accent-red/5 border border-accent-red/20 p-3">
               <p className="text-xs text-accent-red font-medium mb-0.5">Error</p>
               <p className="text-xs text-secondary font-mono">{vm.error_message}</p>

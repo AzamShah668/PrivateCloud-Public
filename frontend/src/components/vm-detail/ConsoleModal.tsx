@@ -42,7 +42,7 @@ export default function ConsoleModal({
   // logged into the Proxmox UI in the same browser so the auth cookie is set.
   const consoleURL = isWindows
     ? `https://${proxmoxHost ?? "100.115.131.104"}:8006/?console=kvm&novnc=1&node=${proxmoxNode ?? "pve"}&resize=1&vmid=${vmid ?? ""}`
-    : `http://${vmIP}:7681`;
+    : `http://${window.location.hostname}:7681`;
 
   const consoleLabel = isWindows ? "Windows Console (noVNC)" : "Web Console";
   const consoleSubtitle = isWindows
@@ -225,3 +225,4 @@ export default function ConsoleModal({
     </AnimatePresence>
   );
 }
+

@@ -11,6 +11,14 @@ interface GuacamoleModalProps {
   vmName: string;
 }
 
+function rewriteGuacUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    if (u.hostname === "localhost" || u.hostname === "127.0.0.1") { u.hostname = window.location.hostname; }
+    return u.toString();
+  } catch { return raw; }
+}
+
 export default function GuacamoleModal({ open, onClose, jobId, vmName }: GuacamoleModalProps) {
   const [clientUrl, setClientUrl] = useState<string | null>(null);
   const [iframeLoaded, setIframeLoaded] = useState(false);
@@ -35,7 +43,7 @@ export default function GuacamoleModal({ open, onClose, jobId, vmName }: Guacamo
       setIframeLoaded(false);
       try {
         const session = await createDesktopSession(jobId);
-        if (!cancelled) setClientUrl(session.client_url);
+        if (!cancelled) setClientUrl(rewriteGuacUrl(session.client_url));
       } catch (e: unknown) {
         if (cancelled) return;
         let msg = "Could not start a remote desktop session.";
@@ -69,7 +77,7 @@ export default function GuacamoleModal({ open, onClose, jobId, vmName }: Guacamo
     setIframeLoaded(false);
     try {
       const session = await createDesktopSession(jobId);
-      setClientUrl(session.client_url);
+      setClientUrl(rewriteGuacUrl(session.client_url));
     } catch (e: unknown) {
       let msg = "Could not start a remote desktop session.";
       if (e instanceof Error) msg = e.message;

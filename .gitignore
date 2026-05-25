@@ -65,3 +65,10 @@ graphify-out/
 .graphify*
 _gen_obsidian.py
 
+# ── Distilled knowledge base (local-only, not published to GitHub) ──────────
+docs/knowledge/
+
+# ── One-off debug/patch scripts (throwaway, not project code) ───────────────
+fix_guac.js
+patch_guac.py
+

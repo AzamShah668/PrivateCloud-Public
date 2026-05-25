@@ -72,17 +72,18 @@ def get_openai_tools() -> List[Dict[str, Any]]:
             "function": {
                 "name": "modify_vm_power_state",
                 "description": (
-                    "Start, stop, or restart a VM. The user can refer to the VM "
-                    "by its name (e.g. 'my-server'), by job ID, or by relative "
-                    "reference like 'my last VM'. Use get_active_inventory first "
-                    "if you need to resolve a name."
+                    "Start, stop, or restart one or multiple VMs. The user can refer to the VMs "
+                    "by their names (e.g. 'my-server'), by job IDs, or by relative "
+                    "reference like 'last'. Use get_active_inventory first "
+                    "if you need to resolve names."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "vm_identifier": {
-                            "type": "string",
-                            "description": "VM name, job ID, or 'last' for the most recently created VM.",
+                        "vm_identifiers": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of VM names, job IDs, or relative references.",
                         },
                         "action": {
                             "type": "string",
@@ -90,7 +91,7 @@ def get_openai_tools() -> List[Dict[str, Any]]:
                             "description": "Power operation to perform.",
                         },
                     },
-                    "required": ["vm_identifier", "action"],
+                    "required": ["vm_identifiers", "action"],
                 },
             },
         },
@@ -99,18 +100,19 @@ def get_openai_tools() -> List[Dict[str, Any]]:
             "function": {
                 "name": "terminate_virtual_machine",
                 "description": (
-                    "Permanently deletes a VM. The user can refer to it by name, "
+                    "Permanently deletes one or multiple VMs. The user can refer to them by name, "
                     "job ID, or 'last'. Always confirm before deleting."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "vm_identifier": {
-                            "type": "string",
-                            "description": "VM name, job ID, or 'last' for the most recently created VM.",
+                        "vm_identifiers": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of VM names, job IDs, or relative references.",
                         },
                     },
-                    "required": ["vm_identifier"],
+                    "required": ["vm_identifiers"],
                 },
             },
         },
@@ -182,16 +184,19 @@ class CloudAgentService:
             "1. When the user wants to CREATE a VM and provides a name but NOT the OS, you MUST ask them which "
             "operating system they want. Available options: Ubuntu 22.04, Ubuntu 24.04, Debian 12, CentOS 9, Windows 11. "
             "Do NOT default the OS — always ask.\n"
-            "2. For CPU, RAM, and storage — if the user doesn't specify, use smart defaults: 2 cores, 2 GB RAM, 20 GB disk. "
+            "2. For CPU, RAM, and storage — if the user doesn't specify, use smart defaults based on the OS. "
+            "For Linux (Ubuntu, Debian, CentOS): 2 cores, 2048 MB RAM, 20 GB disk. "
+            "For Windows 11: 4 cores, 4096 MB RAM, 64 GB disk. "
             "Mention the defaults you're using in your response.\n"
             "3. Users can refer to VMs by name (e.g. 'my-server'), by job ID (e.g. '49'), or by relative "
             "references like 'my last VM', 'the one I just created'. If using a relative reference, call "
             "get_active_inventory first to resolve it.\n"
             "4. For destructive actions (delete), always confirm with the user before proceeding.\n"
-            "5. Be concise but friendly. Use emojis sparingly. Don't be robotic.\n"
+            "5. Be concise but friendly. Use emojis sparingly. Do NOT promise to \\\"update the user later\\\" or \\\"let them know when it's done\\\", because you run synchronously. Just tell them it's provisioning in the background.\n"
             "6. Resource limits: vCPUs 1-16, RAM 512-65536 MB, Disk 10-500 GB.\n"
-            "7. If a user says 'stop all my VMs' or 'delete everything', handle each VM one at a time by "
-            "first listing them, then confirming."
+            "7. Bulk Operations: You can start, stop, restart, or terminate MULTIPLE VMs at once. "
+            "When a user confirms a bulk action (e.g. 'yes delete both'), you MUST pass ALL their job IDs or names "
+            "as an array to the tool in a single call. Do NOT do it one by one."
         )
 
         try:
@@ -317,7 +322,6 @@ class CloudAgentService:
 
                 job_response = create_vm(
                     vm_request=request_model,
-                    background_tasks=background_tasks,
                     current_user=user,
                 )
 
@@ -358,26 +362,42 @@ class CloudAgentService:
 
         elif name == "modify_vm_power_state":
             try:
-                job_id = self._resolve_job_id(args["vm_identifier"], user)
-                update_payload = VMUpdateRequest(action=VMAction(args["action"]))
-
+                identifiers = args.get("vm_identifiers", [])
+                action_str = args["action"]
+                update_payload = VMUpdateRequest(action=VMAction(action_str))
                 mock_response = Response()
-                job_response = update_vm(
-                    job_id=job_id,
-                    update=update_payload,
-                    response=mock_response,
-                    current_user=user,
-                )
+
+                success_list = []
+                for ident in identifiers:
+                    try:
+                        job_id = self._resolve_job_id(ident, user)
+                        job_response = update_vm(
+                            job_id=job_id,
+                            update=update_payload,
+                            response=mock_response,
+                            current_user=user,
+                        )
+                        success_list.append(job_response.vm_name)
+                    except Exception as loop_e:
+                        logger.warning("Bulk modify failed for %s: %s", ident, loop_e)
 
                 action_past = {"start": "started", "stop": "stopped", "restart": "restarted"}
+                
+                if not success_list:
+                    return {
+                        "response": f"Failed to {action_str} any of the specified VMs.",
+                        "tool_called": name,
+                        "execution_status": "failed",
+                    }
+                
                 return {
                     "response": (
-                        f"Done! VM '{job_response.vm_name}' (Job #{job_id}) has been "
-                        f"{action_past.get(args['action'], args['action'])}."
+                        f"Done! Successfully {action_past.get(action_str, action_str)} "
+                        f"{len(success_list)} VM(s): {', '.join(success_list)}."
                     ),
                     "tool_called": name,
                     "execution_status": "success",
-                    "data": job_response.model_dump(),
+                    "data": success_list,
                 }
             except ValueError as ve:
                 return {
@@ -394,23 +414,37 @@ class CloudAgentService:
 
         elif name == "terminate_virtual_machine":
             try:
-                job_id = self._resolve_job_id(args["vm_identifier"], user)
+                identifiers = args.get("vm_identifiers", [])
                 mock_response = Response()
 
-                job_response = delete_vm(
-                    job_id=job_id,
-                    response=mock_response,
-                    current_user=user,
-                )
+                success_list = []
+                for ident in identifiers:
+                    try:
+                        job_id = self._resolve_job_id(ident, user)
+                        job_response = delete_vm(
+                            job_id=job_id,
+                            response=mock_response,
+                            current_user=user,
+                        )
+                        success_list.append(job_response.vm_name)
+                    except Exception as loop_e:
+                        logger.warning("Bulk delete failed for %s: %s", ident, loop_e)
+
+                if not success_list:
+                    return {
+                        "response": "Failed to delete any of the specified VMs. Check names and try again.",
+                        "tool_called": name,
+                        "execution_status": "failed",
+                    }
 
                 return {
                     "response": (
-                        f"VM '{job_response.vm_name}' (Job #{job_id}) is being deleted. "
+                        f"Initiated deletion for {len(success_list)} VM(s): {', '.join(success_list)}. "
                         f"This may take a moment to fully clean up on the cluster."
                     ),
                     "tool_called": name,
                     "execution_status": "success",
-                    "data": job_response.model_dump(),
+                    "data": success_list,
                 }
             except ValueError as ve:
                 return {
@@ -468,3 +502,7 @@ class CloudAgentService:
             "tool_called": name,
             "execution_status": "unsupported",
         }
+
+
+
+

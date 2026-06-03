@@ -4,7 +4,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Terminal, Cpu, Send, Circle } from "lucide-react";
+import { Terminal, Cpu, Send, Circle, BookOpen } from "lucide-react";
 import { api } from "@/api/client";
 import { useQueryClient } from "@tanstack/react-query";
 import Button from "@/components/ui/Button";
@@ -14,6 +14,7 @@ interface Message {
   text: string;
   toolCalled?: string | null;
   status?: string;
+  sources?: string[];
 }
 
 const STORAGE_KEY = "azna-chatops-messages";
@@ -68,7 +69,20 @@ export default function AIChatOps({ fullHeight = false }: AIChatOpsProps = {}) {
     try {
       const response = await api
         .post("ai/chat", { json: { prompt: userPrompt } })
-        .json<{ response: string; tool_called: string | null; execution_status: string }>();
+        .json<{
+          response: string;
+          tool_called: string | null;
+          execution_status: string;
+          data?: unknown;
+        }>();
+
+      // The knowledge-base tool returns its cited sources as a string array in `data`.
+      const sources =
+        response.execution_status === "knowledge" && Array.isArray(response.data)
+          ? (response.data as unknown[]).filter(
+              (s): s is string => typeof s === "string",
+            )
+          : undefined;
 
       setMessages((prev) => [
         ...prev,
@@ -76,12 +90,14 @@ export default function AIChatOps({ fullHeight = false }: AIChatOpsProps = {}) {
           sender: "system",
           text: response.response,
           toolCalled: response.tool_called,
-          status: response.execution_status
+          status: response.execution_status,
+          sources,
         }
       ]);
 
-      // If infrastructure state mappings mutated, instantly synchronize background tables
-      if (response.tool_called) {
+      // Only VM actions mutate infrastructure state — knowledge lookups don't,
+      // so skip the table refresh for those to avoid pointless refetches.
+      if (response.tool_called && response.tool_called !== "search_knowledge_base") {
         queryClient.invalidateQueries({ queryKey: ["vms"] });
         queryClient.invalidateQueries({ queryKey: ["admin", "stats"] });
       }
@@ -150,11 +166,23 @@ export default function AIChatOps({ fullHeight = false }: AIChatOpsProps = {}) {
                 )}
                 {msg.text}
 
-                {msg.toolCalled && (
-                  <div className="mt-2 pt-2 border-t border-accent-cyan/10 flex items-center gap-1.5 text-[10px] text-accent-teal uppercase tracking-wider font-bold">
-                    <Cpu className="h-3 w-3" />
-                    <span>Dispatched Pipeline Matrix: {msg.toolCalled}</span>
+                {msg.toolCalled === "search_knowledge_base" ? (
+                  <div className="mt-2 pt-2 border-t border-accent-amber/10 flex items-center gap-1.5 text-[10px] text-accent-amber uppercase tracking-wider font-bold">
+                    <BookOpen className="h-3 w-3" />
+                    <span>
+                      From Knowledge Base
+                      {msg.sources && msg.sources.length > 0
+                        ? ` · ${msg.sources.join(", ")}`
+                        : ""}
+                    </span>
                   </div>
+                ) : (
+                  msg.toolCalled && (
+                    <div className="mt-2 pt-2 border-t border-accent-cyan/10 flex items-center gap-1.5 text-[10px] text-accent-teal uppercase tracking-wider font-bold">
+                      <Cpu className="h-3 w-3" />
+                      <span>Dispatched Pipeline Matrix: {msg.toolCalled}</span>
+                    </div>
+                  )
                 )}
               </div>
             </motion.div>

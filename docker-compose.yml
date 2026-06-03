@@ -135,6 +135,10 @@ services:
       GUACAMOLE_PUBLIC_URL: http://localhost:9080/guacamole
       GUACAMOLE_ADMIN_USER: guacadmin
       GUACAMOLE_ADMIN_PASSWORD: ${GUACAMOLE_ADMIN_PASSWORD:-guacadmin}
+      # RAG knowledge base — where the ChromaDB vector store persists. The
+      # built-in ONNX embedding model is cached under ~/.cache/chroma (persisted
+      # via the cache volume below) after its one-time ~80 MB download.
+      CHROMA_PATH: /home/appuser/app/data/chroma
 
     ports:
       - "8000:8000"
@@ -159,6 +163,9 @@ services:
     volumes:
       - ./backend/app:/home/appuser/app/app
       - ./db:/home/appuser/app/db
+      # Persist the vector store and the embedding-model cache across restarts.
+      - chroma_data:/home/appuser/app/data/chroma
+      - model_cache:/home/appuser/.cache
 
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
@@ -303,3 +310,9 @@ volumes:
   postgres_data:
   mysql_guacamole_data:
   redis_data:
+  # RAG knowledge base: persisted ChromaDB vector store so the index survives
+  # container restarts.
+  chroma_data:
+  # Cache for ChromaDB's built-in ONNX embedding model (~80 MB) so it is fetched
+  # only once across rebuilds/restarts.
+  model_cache:

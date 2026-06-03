@@ -30,6 +30,9 @@ from app.routes.vm_routes import router as vm_router
 from app.routes.admin_routes import router as admin_router
 from app.routes.ai_routes import router as ai_router
 from app.routes.desktop_routes import router as desktop_router
+from app.routes.knowledge_routes import router as knowledge_router
+from app.routes.template_routes import router as template_router
+from app.routes.class_routes import router as class_router
 
 # ---------------------------------------------------------------------------
 # Logging configuration
@@ -123,6 +126,15 @@ app.include_router(admin_router)
 
 # AI ChatOps:  /ai/chat
 app.include_router(ai_router)
+
+# RAG knowledge base (admin-only):  /admin/knowledge/*
+app.include_router(knowledge_router)
+
+# Clone-from-Template (admin-only):  /templates/*, /clone-batches/*
+app.include_router(template_router)
+
+# Student classes (admin-only):  /classes/*
+app.include_router(class_router)
 
 
 # ---------------------------------------------------------------------------

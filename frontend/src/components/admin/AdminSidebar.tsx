@@ -9,6 +9,9 @@ import {
   ChevronRight,
   ArrowLeft,
   Shield,
+  BookOpen,
+  Copy,
+  GraduationCap,
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useAuthStore } from "@/stores/auth-store";
@@ -18,8 +21,11 @@ import GlitchText from "@/components/ui/GlitchText";
 const navItems = [
   { to: "/admin", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/admin/vms", icon: Server, label: "Virtual Machines" },
+  { to: "/admin/templates", icon: Copy, label: "Templates" },
+  { to: "/admin/classes", icon: GraduationCap, label: "Classes" },
   { to: "/admin/users", icon: Users, label: "User Management" },
   { to: "/admin/audit-logs", icon: ScrollText, label: "Audit Logs" },
+  { to: "/admin/knowledge", icon: BookOpen, label: "Knowledge Base" },
 ];
 
 const bottomItems = [

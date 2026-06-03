@@ -76,4 +76,4 @@ celery_app.conf.update(
 # ── Import tasks ─────────────────────────────────────────────────────────────
 # Tell Celery to explicitly import these task modules so it registers the
 # @celery_app.task decorated functions.
-celery_app.conf.imports = ["app.tasks.vm_tasks"]
+celery_app.conf.imports = ["app.tasks.vm_tasks", "app.tasks.clone_tasks"]

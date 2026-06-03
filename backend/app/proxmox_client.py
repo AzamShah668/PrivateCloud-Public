@@ -558,9 +558,10 @@ class ProxmoxClient:
         name: str,
         node: Optional[str] = None,
         storage: Optional[str] = None,
+        full: bool = True,
     ) -> str:
         """
-        Clone a VM template to a new, fully independent VM (full clone).
+        Clone a VM template to a new VM.
 
         Args:
             template_vmid : VMID of the source template (e.g. 9000).
@@ -569,6 +570,14 @@ class ProxmoxClient:
             node          : Proxmox node name (defaults to self.default_node).
             storage       : Target storage pool (e.g. "local-lvm"). If None,
                             Proxmox uses the same storage as the template.
+            full          : True  → full clone (independent disk copy; slower,
+                                    more storage, source can change/be deleted).
+                            False → linked clone (shares the source's base disk,
+                                    only deltas stored; near-instant, tiny disk).
+                                    Requires the source to be a Proxmox *template*
+                                    on storage that supports linked clones
+                                    (LVM-thin, ZFS, qcow2-on-dir). The "storage"
+                                    arg must be omitted for a linked clone.
 
         Returns:
             str: The UPID (task ID) of the async clone operation.
@@ -583,18 +592,96 @@ class ProxmoxClient:
         params: Dict[str, Any] = {
             "newid":  new_vmid,
             "name":   name,
-            "full":   1,       # full clone — independent disk, not linked
+            "full":   1 if full else 0,
             "target": node,
         }
-        if storage:
+        # A linked clone cannot target a different storage — it shares the
+        # source's base disk. Only pass storage for full clones.
+        if storage and full:
             params["storage"] = storage
 
         upid = self._post(path, params)
         logger.info(
-            "Clone task started: template vmid=%d → new vmid=%d  (upid=%s)",
-            template_vmid, new_vmid, upid,
+            "Clone task started: template vmid=%d → new vmid=%d  (%s clone, upid=%s)",
+            template_vmid, new_vmid, "full" if full else "linked", upid,
         )
         return upid
+
+    def convert_to_template(self, vmid: int, node: Optional[str] = None) -> None:
+        """
+        Convert an existing (stopped) VM into a Proxmox template via `qm template`.
+
+        A Proxmox template is a frozen, read-only VM that cannot be started but
+        can be cloned cheaply. Converting is REQUIRED before linked cloning and
+        is harmless for full cloning. The operation is idempotent at the API
+        level — Proxmox returns an error if the VM is already a template, which
+        callers may safely ignore.
+
+        Args:
+            vmid : VMID of the VM to freeze into a template.
+            node : Proxmox node name (defaults to self.default_node).
+
+        Raises:
+            ProxmoxAPIError: if Proxmox rejects the request (e.g. VM is running).
+        """
+        node = node or self.default_node
+        path = f"nodes/{node}/qemu/{vmid}/template"
+        self._post(path, {})
+        logger.info("Converted vmid=%d into a Proxmox template on node=%s.", vmid, node)
+
+    def get_free_vmids(
+        self,
+        count: int,
+        node: Optional[str] = None,
+        extra_reserved: Optional[set] = None,
+    ) -> List[int]:
+        """
+        Allocate `count` distinct, currently-unused VMIDs in a single pass.
+
+        `get_next_vmid()` (cluster/nextid) only returns ONE id and keeps
+        returning the same value until that id is actually consumed by a created
+        VM. For bulk cloning we need N ids up-front, so this method seeds from
+        cluster/nextid and then walks upward, skipping any id already in use on
+        the node OR present in `extra_reserved`, until it has collected `count`
+        free ids.
+
+        `extra_reserved` lets callers exclude VMIDs that are reserved in our own
+        database but not yet created on Proxmox (e.g. queued clones from a
+        concurrent distribute) — without it, two simultaneous bulk clones would
+        see the same Proxmox in-use set and hand out overlapping ids. Callers
+        should still serialise allocation with a lock for full safety.
+
+        Args:
+            count          : how many free VMIDs to return.
+            node           : Proxmox node to check (defaults to default_node).
+            extra_reserved : additional VMIDs to treat as in-use.
+
+        Returns:
+            List[int]: `count` distinct free VMIDs in ascending order.
+
+        Raises:
+            ProxmoxAPIError: if Proxmox is unreachable while listing VMs.
+        """
+        node = node or self.default_node
+        in_use = {int(vm["vmid"]) for vm in self.list_vms(node) if "vmid" in vm}
+        if extra_reserved:
+            in_use |= {int(v) for v in extra_reserved}
+
+        candidate = self.get_next_vmid()
+        free: List[int] = []
+        # Cap the scan so a misconfigured cluster can't loop forever.
+        scan_limit = candidate + count + len(in_use) + 1000
+        while len(free) < count and candidate < scan_limit:
+            if candidate not in in_use:
+                free.append(candidate)
+            candidate += 1
+
+        if len(free) < count:
+            raise ProxmoxAPIError(
+                f"Could not allocate {count} free VMIDs (found {len(free)})."
+            )
+        logger.info("Allocated %d free VMIDs: %s", count, free)
+        return free
 
     def wait_for_task(
         self,

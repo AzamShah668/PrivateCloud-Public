@@ -9,6 +9,10 @@
 
 | # | Date | Title | Sprint | File |
 |---|------|-------|--------|------|
+| 020 | 2026-05-27 | Clone-from-Template: Teacher Templates → Bulk-Clone to a Class | 5 | [020-clone-from-template.md](journal/020-clone-from-template.md) |
+| 019 | 2026-05-26 | RAG Knowledge Base Integration into the ChatOps Agent | 4 | [019-rag-knowledge-base-integration.md](journal/019-rag-knowledge-base-integration.md) |
+| 018 | 2026-05-25 | Recover vm_ip When Initial Provisioning Failed | 4 | [018-vm-ip-recovery-after-failed-provisioning.md](journal/018-vm-ip-recovery-after-failed-provisioning.md) |
+| 017 | 2026-05-24 | Cross-Device Desktop Access (Guacamole URL Rewrite) | 4 | [017-cross-device-desktop-access.md](journal/017-cross-device-desktop-access.md) |
 | 016 | 2026-05-24 | Fix Celery Auto-Discovery and Worker Healthcheck | 3 | [016-celery-worker-fix.md](journal/016-celery-worker-fix.md) |
 | 015 | 2026-04-27 | Iteration 3 UML Diagrams (Class + Sequence, PlantUML) | 3 | [015-i3-uml-diagrams.md](journal/015-i3-uml-diagrams.md) |
 | 014 | 2026-04-20 | Admin Portal DB Schema Extensions (I3: 4 additions) | 3 | [014-admin-db-schema-extensions.md](journal/014-admin-db-schema-extensions.md) |

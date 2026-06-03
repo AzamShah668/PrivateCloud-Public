@@ -19,7 +19,16 @@ python-dotenv>=1.0         # Reads .env files into os.environ
 # ── Authentication ────────────────────────────────────────────────────────────
 python-jose[cryptography]>=3.3.0   # JWT encode / decode
 passlib[bcrypt]>=1.7.4             # Password hashing with bcrypt
-bcrypt==3.2.0                      # Pin bcrypt due to passlib compatibility bug
+# MUST stay pinned to 4.0.1 — it's the only version that satisfies BOTH:
+#   - chromadb (requires bcrypt>=4.0.1), and
+#   - passlib 1.7.4, which crashes on bcrypt>=4.1.0.
+# bcrypt 4.1.0 made over-72-byte passwords raise ValueError instead of
+# truncating; passlib 1.7.4's startup "detect_wrap_bug" probe hashes a long
+# test password and does NOT catch that ValueError, so its bcrypt backend
+# fails to initialise and ALL password verification breaks ("Invalid username
+# or password" for valid creds). 4.0.1 predates that change. Do not bump until
+# passlib is replaced or updated.
+bcrypt==4.0.1
 
 # ── HTTP Requests (used by ProxmoxClient) ────────────────────────────────────
 requests>=2.31.0           # Simple HTTP library for Proxmox REST API calls
@@ -34,3 +43,18 @@ openai>=1.50.0
 # ── Task Queue (Celery + Redis) ──────────────────────────────────────────────
 celery>=5.4.0              # Distributed task queue for async VM provisioning
 redis>=5.0.0               # Python client for Redis (Celery broker + backend)
+
+# ── RAG Knowledge Base (vector retrieval for the ChatOps agent) ───────────────
+# The agent answers conceptual / "how does X work" questions by retrieving
+# relevant chunks from admin-uploaded documents. The retrieved context is then
+# answered by the SAME OpenRouter model the agent already uses.
+#
+# Embeddings use ChromaDB's BUILT-IN default model (all-MiniLM-L6-v2 as a small
+# ONNX model via onnxruntime — already a chromadb dependency). This deliberately
+# AVOIDS sentence-transformers + torch (~1.5-2.5 GB) for the same model/quality.
+#   chromadb                 → self-hosted vector DB + built-in ONNX embedder
+#   pypdf                    → extract text from uploaded PDFs
+#   langchain-text-splitters → RecursiveCharacterTextSplitter (500/50 chunking)
+chromadb>=0.5.5
+pypdf>=4.3.1
+langchain-text-splitters>=0.2.4

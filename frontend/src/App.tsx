@@ -18,6 +18,9 @@ import AdminVMsPage from "@/pages/admin/AdminVMsPage";
 import AdminUsersPage from "@/pages/admin/AdminUsersPage";
 import AdminAuditLogsPage from "@/pages/admin/AdminAuditLogsPage";
 import AdminSettingsPage from "@/pages/admin/AdminSettingsPage";
+import AdminKnowledgePage from "@/pages/admin/AdminKnowledgePage";
+import AdminTemplatesPage from "@/pages/admin/AdminTemplatesPage";
+import AdminClassesPage from "@/pages/admin/AdminClassesPage";
 
 // Layout
 import AppShell from "@/components/layout/AppShell";
@@ -60,8 +63,11 @@ export default function App() {
             <Route path="/admin" element={<AdminShell />}>
               <Route index element={<AdminDashboardPage />} />
               <Route path="vms" element={<AdminVMsPage />} />
+              <Route path="templates" element={<AdminTemplatesPage />} />
+              <Route path="classes" element={<AdminClassesPage />} />
               <Route path="users" element={<AdminUsersPage />} />
               <Route path="audit-logs" element={<AdminAuditLogsPage />} />
+              <Route path="knowledge" element={<AdminKnowledgePage />} />
               <Route path="settings" element={<AdminSettingsPage />} />
             </Route>
           </Route>

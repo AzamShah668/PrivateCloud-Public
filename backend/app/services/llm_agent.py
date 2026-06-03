@@ -16,6 +16,7 @@ from openai import AsyncOpenAI
 from app.models.user import UserInDB
 from app.models.vm import VMCreateRequest, VMUpdateRequest, VMAction, OS_Choice
 from app.routes.vm_routes import create_vm, update_vm, delete_vm, list_my_vms
+from app.services.rag_service import rag_service, RagError
 from fastapi import BackgroundTasks, Response
 
 logger = logging.getLogger(__name__)
@@ -124,6 +125,31 @@ def get_openai_tools() -> List[Dict[str, Any]]:
                 "parameters": {"type": "object", "properties": {}},
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_knowledge_base",
+                "description": (
+                    "Search the knowledge base of admin-uploaded documentation "
+                    "(PDFs, guides, cloud/DevOps concepts, platform docs) to answer "
+                    "INFORMATIONAL questions. Call this whenever the user asks how "
+                    "something works, what something means, for an explanation, or "
+                    "any conceptual/'how-to' question that is NOT a direct request "
+                    "to deploy, start, stop, restart, delete, or list their VMs. "
+                    "The retrieved text will be used to write a grounded answer."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The user's information need, phrased as a search query.",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            },
+        },
     ]
 
 
@@ -196,7 +222,11 @@ class CloudAgentService:
             "6. Resource limits: vCPUs 1-16, RAM 512-65536 MB, Disk 10-500 GB.\n"
             "7. Bulk Operations: You can start, stop, restart, or terminate MULTIPLE VMs at once. "
             "When a user confirms a bulk action (e.g. 'yes delete both'), you MUST pass ALL their job IDs or names "
-            "as an array to the tool in a single call. Do NOT do it one by one."
+            "as an array to the tool in a single call. Do NOT do it one by one.\n"
+            "8. Knowledge questions: For INFORMATIONAL questions — how something works, what a concept means, "
+            "explanations, or anything found in the platform's documentation (cloud, DevOps, Proxmox, the AZNA "
+            "platform itself) — call search_knowledge_base instead of answering from memory. These are questions "
+            "to ANSWER, not actions to perform on VMs. Ground your answer in what the knowledge base returns."
         )
 
         try:
@@ -497,10 +527,106 @@ class CloudAgentService:
                     "execution_status": "failed",
                 }
 
+        elif name == "search_knowledge_base":
+            return await self._answer_from_knowledge(args.get("query", ""))
+
         return {
             "response": "The selected tool is not implemented.",
             "tool_called": name,
             "execution_status": "unsupported",
+        }
+
+    async def _answer_from_knowledge(self, query: str) -> Dict[str, Any]:
+        """
+        RAG: retrieve relevant chunks from the vector store, then ask the SAME
+        OpenRouter model to write a grounded answer using only that context.
+
+        This is the "Augment + Generate" half of the pipeline; the retrieval
+        ("Retrieve") happens in rag_service.search().
+        """
+        if not query.strip():
+            return {
+                "response": "What would you like to know? Ask me a question and I'll check the knowledge base.",
+                "tool_called": "search_knowledge_base",
+                "execution_status": "conversational",
+            }
+
+        if not rag_service.is_available():
+            return {
+                "response": (
+                    "The knowledge base isn't available right now. An admin needs to upload "
+                    "documents under Admin → Knowledge Base before I can answer questions from it."
+                ),
+                "tool_called": "search_knowledge_base",
+                "execution_status": "unavailable",
+            }
+
+        try:
+            matches = rag_service.search(query)
+        except RagError as exc:
+            # A genuine retrieval failure — NOT "no documents". Report it as such
+            # instead of misleading the user into thinking the KB is empty.
+            logger.error("Knowledge search failed: %s", exc)
+            return {
+                "response": (
+                    "I hit a problem searching the knowledge base. Please try again "
+                    "in a moment; if it persists, an admin should check the service."
+                ),
+                "tool_called": "search_knowledge_base",
+                "execution_status": "failed",
+            }
+
+        if not matches:
+            return {
+                "response": (
+                    "I couldn't find anything about that in the knowledge base. "
+                    "An admin may need to upload a document that covers it."
+                ),
+                "tool_called": "search_knowledge_base",
+                "execution_status": "no_results",
+                "data": [],
+            }
+
+        # Build the grounding context block from the retrieved chunks.
+        context_block = "\n\n".join(
+            f"[Source: {m['source']}]\n{m['content']}" for m in matches
+        )
+        sources = sorted({m["source"] for m in matches})
+
+        grounding_system = (
+            "You are CloudOps AI's knowledge assistant. Answer the user's question using ONLY "
+            "the context below, which was retrieved from the platform's knowledge base. "
+            "Be clear and concise. If the context does not contain the answer, say so honestly "
+            "instead of inventing facts. Cite the source name(s) you used at the end.\n\n"
+            f"--- CONTEXT ---\n{context_block}\n--- END CONTEXT ---"
+        )
+
+        try:
+            completion = await self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {"role": "system", "content": grounding_system},
+                    {"role": "user", "content": query},
+                ],
+            )
+            answer = (completion.choices[0].message.content or "").strip()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("RAG synthesis failed: %s", exc, exc_info=True)
+            return {
+                "response": f"I found relevant material but couldn't generate an answer: {exc!s}",
+                "tool_called": "search_knowledge_base",
+                "execution_status": "failed",
+                "data": sources,
+            }
+
+        if not answer:
+            answer = "I found relevant material but couldn't form an answer. Try rephrasing your question."
+
+        return {
+            "response": answer,
+            "tool_called": "search_knowledge_base",
+            "execution_status": "knowledge",
+            "data": sources,
         }
 
 

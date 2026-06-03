@@ -232,19 +232,22 @@ def init_db() -> None:
                         NOT NULL DEFAULT 'system.unknown'
                 """
             )
+            # Drop-then-add so the allowed-values list can grow over time
+            # (a plain ADD CONSTRAINT IF duplicate would never pick up new
+            # values on an already-initialised database).
+            cur.execute("ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS audit_action_type_check")
             cur.execute(
                 """
-                DO $$ BEGIN
-                    ALTER TABLE audit_logs
-                        ADD CONSTRAINT audit_action_type_check
-                        CHECK (action_type IN (
-                            'user.create','user.role_change','user.quota_change',
-                            'user.suspend','user.delete','user.reactivate',
-                            'vm.create','vm.delete','vm.status_change',
-                            'settings.change','admin.login','system.unknown'
-                        ));
-                EXCEPTION WHEN duplicate_object THEN NULL;
-                END $$;
+                ALTER TABLE audit_logs
+                    ADD CONSTRAINT audit_action_type_check
+                    CHECK (action_type IN (
+                        'user.create','user.role_change','user.quota_change',
+                        'user.suspend','user.delete','user.reactivate',
+                        'vm.create','vm.delete','vm.status_change',
+                        'settings.change','admin.login','system.unknown',
+                        'template.create','template.publish','template.distribute',
+                        'class.create','class.enroll','clone.create'
+                    ))
                 """
             )
             cur.execute(
@@ -295,6 +298,103 @@ def init_db() -> None:
                 ON CONFLICT (key) DO NOTHING
                 """
             )
+
+            # ----------------------------------------------------------
+            # Sprint 5: Clone-from-Template schema
+            # Teacher publishes a golden VM as a template, then bulk-clones
+            # it to a class of students. The actual cloned VMs live in
+            # vm_jobs (so dashboard/console/RDP/expiry/audit all work
+            # unchanged) — these tables add template→class→clone lineage.
+            # See docs/design/clone-templates-architecture.md
+            # ----------------------------------------------------------
+
+            # vm_templates — a published, frozen golden VM that can be cloned.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS vm_templates (
+                    id             SERIAL PRIMARY KEY,
+                    owner_id       INTEGER NOT NULL REFERENCES users(id),
+                    name           TEXT NOT NULL,
+                    description    TEXT,
+                    source_vmid    INTEGER NOT NULL,
+                    os_choice      TEXT NOT NULL,
+                    clone_mode     TEXT NOT NULL DEFAULT 'full'
+                                   CHECK (clone_mode IN ('full','linked')),
+                    default_cpu    INTEGER NOT NULL DEFAULT 2,
+                    default_ram_mb INTEGER NOT NULL DEFAULT 2048,
+                    status         TEXT NOT NULL DEFAULT 'draft'
+                                   CHECK (status IN ('draft','published','archived')),
+                    created_at     TIMESTAMPTZ NOT NULL,
+                    updated_at     TIMESTAMPTZ NOT NULL
+                )
+                """
+            )
+
+            # class_groups — a reusable class/batch of students, owned by a teacher.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS class_groups (
+                    id          SERIAL PRIMARY KEY,
+                    owner_id    INTEGER NOT NULL REFERENCES users(id),
+                    name        TEXT NOT NULL,
+                    description TEXT,
+                    created_at  TIMESTAMPTZ NOT NULL
+                )
+                """
+            )
+
+            # class_enrollments — which students belong to which class.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS class_enrollments (
+                    id          SERIAL PRIMARY KEY,
+                    class_id    INTEGER NOT NULL REFERENCES class_groups(id) ON DELETE CASCADE,
+                    student_id  INTEGER NOT NULL REFERENCES users(id),
+                    enrolled_at TIMESTAMPTZ NOT NULL,
+                    UNIQUE (class_id, student_id)
+                )
+                """
+            )
+
+            # clone_batches — one "distribute template X to class Y" action.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS clone_batches (
+                    id           SERIAL PRIMARY KEY,
+                    template_id  INTEGER NOT NULL REFERENCES vm_templates(id),
+                    class_id     INTEGER NOT NULL REFERENCES class_groups(id),
+                    initiated_by INTEGER NOT NULL REFERENCES users(id),
+                    clone_mode   TEXT NOT NULL,
+                    cpu_cores    INTEGER NOT NULL,
+                    ram_mb       INTEGER NOT NULL,
+                    total        INTEGER NOT NULL,
+                    status       TEXT NOT NULL DEFAULT 'in_progress'
+                                 CHECK (status IN ('in_progress','completed','partial','failed')),
+                    created_at   TIMESTAMPTZ NOT NULL,
+                    updated_at   TIMESTAMPTZ NOT NULL
+                )
+                """
+            )
+
+            # clone_jobs — one clone per student (child of a batch).
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS clone_jobs (
+                    id            SERIAL PRIMARY KEY,
+                    batch_id      INTEGER NOT NULL REFERENCES clone_batches(id) ON DELETE CASCADE,
+                    student_id    INTEGER NOT NULL REFERENCES users(id),
+                    vm_job_id     INTEGER REFERENCES vm_jobs(id),
+                    status        TEXT NOT NULL DEFAULT 'queued'
+                                  CHECK (status IN ('queued','cloning','done','failed')),
+                    error_message TEXT,
+                    created_at    TIMESTAMPTZ NOT NULL,
+                    updated_at    TIMESTAMPTZ NOT NULL
+                )
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_clone_jobs_batch   ON clone_jobs (batch_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_clone_jobs_student ON clone_jobs (student_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_enroll_class       ON class_enrollments (class_id)")
 
         conn.commit()
     logger.info("Database schema verified / created successfully.")
@@ -437,7 +537,7 @@ def create_vm_job(
     vm_name: str,
     os_choice: str,
     request_payload: dict,
-    expiry_hours: int = 2,
+    expiry_hours: int | None = 2,
 ) -> int:
     """
     Insert a new VM job in 'queued' status and return its generated id.
@@ -447,11 +547,17 @@ def create_vm_job(
 
     expires_at is set to (now + expiry_hours) so a background task can
     auto-stop the VM after its lease elapses. Default 2 hours per i4 spec.
+    Pass expiry_hours=None to disable auto-expiry (expires_at stays NULL) —
+    used for teacher-distributed clones whose lifetime the teacher manages.
     """
     from datetime import timedelta
     now_dt = datetime.now(tz=timezone.utc)
     now_iso = now_dt.isoformat()
-    expires_iso = (now_dt + timedelta(hours=expiry_hours)).isoformat()
+    expires_iso = (
+        (now_dt + timedelta(hours=expiry_hours)).isoformat()
+        if expiry_hours is not None
+        else None
+    )
     with _conn() as conn:
         with _dict_cursor(conn) as cur:
             cur.execute(
@@ -576,6 +682,21 @@ def get_vm_job(job_id: int) -> dict | None:
         with _dict_cursor(conn) as cur:
             cur.execute("SELECT * FROM vm_jobs WHERE id = %s", (job_id,))
             return cur.fetchone()
+
+
+def get_reserved_vmids() -> set[int]:
+    """
+    Return every VMID currently reserved in vm_jobs that is NOT deleted.
+
+    A freshly queued clone has a vm_jobs row with its VMID but the VM may not
+    exist on Proxmox yet, so Proxmox's own VMID list won't include it. Callers
+    allocating new VMIDs (bulk clone) must exclude these to avoid handing the
+    same id to two concurrent jobs.
+    """
+    with _conn() as conn:
+        with _dict_cursor(conn) as cur:
+            cur.execute("SELECT vmid FROM vm_jobs WHERE status != 'deleted'")
+            return {int(r["vmid"]) for r in cur.fetchall()}
 
 
 def list_user_vm_jobs(user_id: int, limit: int = 50) -> list[dict]:
@@ -855,6 +976,13 @@ AUDIT_ACTION_TYPES = frozenset({
     "settings.change",
     "admin.login",
     "system.unknown",
+    # Sprint 5: clone-from-template
+    "template.create",
+    "template.publish",
+    "template.distribute",
+    "class.create",
+    "class.enroll",
+    "clone.create",
 })
 
 

@@ -32,13 +32,13 @@ RUN apt-get update \
 
 WORKDIR /build
 
-# Copy requirements first so Docker can cache this layer.
-# The layer is only rebuilt when requirements.txt changes, not on every
-# code change — this keeps rebuilds fast during development.
-COPY backend/requirements.txt .
-
 # Install dependencies into an isolated virtual environment.
 # Using a venv makes it trivial to copy just the packages to stage 2.
+#
+# Note: RAG embeddings use ChromaDB's built-in ONNX model (onnxruntime), NOT
+# sentence-transformers/torch — so there is no multi-GB ML layer here. Keep it
+# that way: do not add torch/sentence-transformers back unless truly required.
+COPY backend/requirements.txt .
 RUN python -m venv /opt/venv && \
     /opt/venv/bin/pip install --no-cache-dir --upgrade pip && \
     /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
@@ -64,6 +64,17 @@ ENV PATH="/opt/venv/bin:$PATH"
 # ever compromised, the attacker gets root-level access to the host too.
 RUN useradd --create-home --shell /bin/bash appuser
 WORKDIR /home/appuser/app
+
+# Pre-create the RAG data + HuggingFace cache dirs and hand the app dir to
+# appuser — done as root, BEFORE the USER switch. When the (initially empty)
+# named volumes mount onto these paths, Docker seeds them with appuser
+# ownership, so the non-root user can write ChromaDB's SQLite file and the
+# downloaded embedding model WITHOUT a runtime chown. Without this, Docker
+# creates the volume mountpoints as root and chromadb fails with
+# "unable to open database file" (SQLite code 14).
+RUN mkdir -p /home/appuser/app/data/chroma /home/appuser/.cache \
+    && chown -R appuser:appuser /home/appuser/app /home/appuser/.cache
+
 USER appuser
 
 # Copy the application code.

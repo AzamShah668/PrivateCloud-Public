@@ -57,11 +57,14 @@ celery_app.conf.update(
     # Increase this only if you add more Proxmox nodes to the cluster.
     worker_concurrency=2,
 
-    # If a task doesn't finish in 15 minutes, something is stuck — kill it.
-    task_time_limit=900,
+    # A full clone of a large Windows disk + boot + guest-agent IP polling can
+    # legitimately run 20-40 min, so the hard kill has to sit above that or a
+    # slow-but-healthy clone gets killed and marked failed. Clones are rare and
+    # Proxmox is the bottleneck, so a generous ceiling is fine.
+    task_time_limit=3600,        # hard kill at 60 min
 
-    # Soft limit at 12 minutes — gives the task a chance to clean up.
-    task_soft_time_limit=720,
+    # Soft limit ~55 min — gives the task a chance to clean up first.
+    task_soft_time_limit=3300,
 
     # Acknowledge tasks only AFTER they complete (not when picked up).
     # This means if a worker crashes mid-task, Redis still has the task

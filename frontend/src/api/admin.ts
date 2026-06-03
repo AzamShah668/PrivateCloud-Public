@@ -97,8 +97,9 @@ export async function listAllUsers(
     .json<AdminUser[]>();
 }
 
-export async function listAllVMs(): Promise<VMJobAdmin[]> {
-  return api.get("admin/vms").json<VMJobAdmin[]>();
+export async function listAllVMs(verifyProxmox = false): Promise<VMJobAdmin[]> {
+  const searchParams = verifyProxmox ? { verify_proxmox: "true" } : undefined;
+  return api.get("admin/vms", { searchParams }).json<VMJobAdmin[]>();
 }
 
 export async function listAuditLogs(

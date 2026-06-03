@@ -43,10 +43,10 @@ export function useAdminUsers(includeDeleted = false) {
   });
 }
 
-export function useAdminVMs() {
+export function useAdminVMs(verifyProxmox = false) {
   return useQuery({
-    queryKey: ["admin", "vms"],
-    queryFn: listAllVMs,
+    queryKey: ["admin", "vms", { verifyProxmox }],
+    queryFn: () => listAllVMs(verifyProxmox),
     refetchInterval: 10_000,
   });
 }

@@ -9,6 +9,7 @@
 
 | # | Date | Title | Sprint | File |
 |---|------|-------|--------|------|
+| 021 | 2026-06-03 | Templates that are actually Proxmox templates (clone-then-freeze) + admin Deploy-page category | 5 | [021-real-proxmox-templates.md](journal/021-real-proxmox-templates.md) |
 | 020 | 2026-05-27 | Clone-from-Template: Teacher Templates → Bulk-Clone to a Class | 5 | [020-clone-from-template.md](journal/020-clone-from-template.md) |
 | 019 | 2026-05-26 | RAG Knowledge Base Integration into the ChatOps Agent | 4 | [019-rag-knowledge-base-integration.md](journal/019-rag-knowledge-base-integration.md) |
 | 018 | 2026-05-25 | Recover vm_ip When Initial Provisioning Failed | 4 | [018-vm-ip-recovery-after-failed-provisioning.md](journal/018-vm-ip-recovery-after-failed-provisioning.md) |

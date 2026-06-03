@@ -1,23 +1,27 @@
 # =============================================================================
 # routes/template_routes.py
 # =============================================================================
-# Admin-only API for the Sprint 5 "Clone-from-Template" feature.
+# API for the Sprint 5 "Clone-from-Template" feature.
 #
-# A teacher publishes a golden VM as a template, then distributes one clone
-# per student to a whole class in a single action. The cloned VMs land in the
-# existing vm_jobs table, so the student dashboard / console / RDP all keep
-# working unchanged.
+# A teacher publishes a golden VM as a template, then ASSIGNS it to a class.
+# Students see assigned templates on their Deploy page and create VMs on
+# demand (self-serve). The old "distribute" (auto-deploy to all students)
+# is retained as a secondary option for urgent scenarios.
 #
-# Endpoints (all require admin):
+# Admin endpoints:
 #   POST   /templates                      → publish a template from a VM
 #   GET    /templates                      → list templates
 #   GET    /templates/{id}                 → template detail
 #   PATCH  /templates/{id}                 → update / archive a template
-#   POST   /templates/{id}/distribute      → bulk-clone to a class
+#   POST   /templates/{id}/assign          → grant class access (no VMs)
+#   POST   /templates/{id}/distribute      → bulk-clone to a class (legacy)
+#   POST   /templates/{id}/revoke          → revoke student access
+#   GET    /templates/{id}/assignments     → list assignments for a template
 #   GET    /clone-batches/{id}             → live per-student clone progress
 #
-# Teacher-distributed clones BYPASS the per-student daily quota by design —
-# the whole point is that everyone gets one instantly.
+# Student + Admin endpoints:
+#   GET    /templates/available            → student's assigned templates
+#   POST   /templates/{id}/deploy          → deploy one VM from template
 #
 # See docs/design/clone-templates-architecture.md
 # =============================================================================
@@ -33,7 +37,7 @@ from typing import List
 import redis
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.auth import require_admin
+from app.auth import get_current_user, require_admin
 from app.models.user import UserInDB
 from app.models.template import (
     CloneMode,
@@ -41,12 +45,22 @@ from app.models.template import (
     TemplateCreateRequest,
     TemplateUpdateRequest,
     TemplateResponse,
+    DeployFromTemplateRequest,
     DistributeRequest,
     BatchResponse,
     BatchProgressResponse,
+    AssignRequest,
+    StudentTemplateResponse,
+    AssignmentResponse,
+    AssignmentCountResponse,
 )
-from app.proxmox_client import ProxmoxClient, ProxmoxAPIError
-from app.tasks.clone_tasks import clone_template_for_student
+from app.models.vm import VMJobResponse
+from app.proxmox_client import ProxmoxClient
+from app.tasks.clone_tasks import (
+    build_template,
+    clone_template_for_student,
+    deploy_template_for_user,
+)
 from db import database
 from db import templates as tdb
 
@@ -117,29 +131,34 @@ def _student_vm_name(template_name: str, username: str) -> str:
 # Templates
 # ---------------------------------------------------------------------------
 
-@router.post("/templates", response_model=TemplateResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/templates", response_model=TemplateResponse, status_code=status.HTTP_202_ACCEPTED)
 def create_template(
     req: TemplateCreateRequest,
     admin: UserInDB = Depends(require_admin),
 ):
     """
-    Publish a template from one of the admin's existing VMs (by vm_job_id).
+    Publish a DEDICATED Proxmox template from one of the admin's VMs.
 
-    For a LINKED template we also convert the source VM into a Proxmox template
-    (`qm template`) so it can be linked-cloned. The source VM must be stopped;
-    if Proxmox rejects the conversion we surface the error.
+    Unlike the old behaviour (which only registered a row pointing at a running
+    VM), this now builds a real, standalone Proxmox template — exactly like the
+    global golden images 9000/9001, but private/scoped to this template row:
+
+      1. Allocate a fresh VMID for the dedicated template.
+      2. Create the row in 'building' status.
+      3. A Celery task full-clones the source → that VMID, then freezes it with
+         `qm template`. The admin's source VM is left untouched and usable.
+
+    Returns 202 immediately; the row flips to 'published' (or 'failed') when the
+    background build finishes. Both full and linked clones work off the frozen
+    template afterwards.
     """
     source_job = database.get_vm_job(req.vm_job_id)
     if not source_job:
         raise HTTPException(status_code=404, detail=f"Source VM job {req.vm_job_id} not found.")
     # An admin is the platform operator and may publish ANY VM as a template,
     # regardless of which user created it. (No ownership restriction — by design.)
-    # Note: publishing a LINKED template freezes the source VM into a Proxmox
-    # template irreversibly, so the UI should make that clear to the admin.
     if not source_job.get("vmid"):
         raise HTTPException(status_code=400, detail="Source VM has no Proxmox VMID yet.")
-    # Must be a finished VM. Proxmox also requires the VM to be stopped before
-    # `qm template` (linked mode) — surfaced as a 502 if it isn't.
     if source_job["status"] != "done":
         raise HTTPException(
             status_code=400,
@@ -149,40 +168,58 @@ def create_template(
     source_vmid = source_job["vmid"]
     os_choice = source_job["os_choice"]
 
-    # Linked clones require the source to be frozen as a Proxmox template.
-    template_status = TemplateStatus.draft.value
-    if req.clone_mode == CloneMode.linked:
+    # Allocate a dedicated VMID for the new Proxmox template under the same
+    # cross-request lock the distribute path uses, excluding VMIDs already
+    # reserved in our DB (queued clones + other building templates).
+    with _vmid_allocation_lock() as locked:
+        if not locked:
+            logger.warning("Proceeding with template VMID allocation WITHOUT lock (Redis unavailable).")
         try:
             proxmox._ensure_authenticated()
-            proxmox.convert_to_template(vmid=source_vmid, node=_DEFAULT_NODE)
-            template_status = TemplateStatus.published.value
-        except ProxmoxAPIError as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=(
-                    "Could not convert the source VM into a Proxmox template "
-                    f"(required for linked clones). Stop the VM and retry. ({exc})"
-                ),
-            )
-    else:
-        template_status = TemplateStatus.published.value
+            template_vmid = proxmox.get_free_vmids(
+                count=1,
+                node=_DEFAULT_NODE,
+                extra_reserved=database.get_reserved_vmids(),
+            )[0]
+        except Exception as exc:
+            logger.error("Could not allocate a VMID for the template: %s", exc)
+            raise HTTPException(status_code=502, detail="Could not reach Proxmox to allocate a VMID.")
 
-    row = tdb.create_template(
+        row = tdb.create_template(
+            owner_id=admin.id,
+            name=req.name,
+            source_vmid=source_vmid,
+            template_vmid=template_vmid,
+            os_choice=os_choice,
+            description=req.description,
+            clone_mode=req.clone_mode.value,
+            default_cpu=req.default_cpu,
+            default_ram_mb=req.default_ram_mb,
+            status=TemplateStatus.building.value,
+        )
+
+    template_name = f"tmpl-{_slug(req.name)}"[:30].rstrip("-") or f"tmpl-{template_vmid}"
+    build_template.delay(
+        template_id=row["id"],
         owner_id=admin.id,
-        name=req.name,
         source_vmid=source_vmid,
-        os_choice=os_choice,
-        description=req.description,
-        clone_mode=req.clone_mode.value,
-        default_cpu=req.default_cpu,
-        default_ram_mb=req.default_ram_mb,
-        status=template_status,
+        template_vmid=template_vmid,
+        template_name=template_name,
+        node=_DEFAULT_NODE,
     )
+
     database.log_action(
         user_id=admin.id, action_type="template.create",
         action="template.create", target_type="vm_template",
         target_id=str(row["id"]),
-        details={"name": req.name, "source_vmid": source_vmid, "clone_mode": req.clone_mode.value},
+        details={
+            "name": req.name, "source_vmid": source_vmid,
+            "template_vmid": template_vmid, "clone_mode": req.clone_mode.value,
+        },
+    )
+    logger.info(
+        "Building template %d '%s': source vmid=%d → template vmid=%d.",
+        row["id"], req.name, source_vmid, template_vmid,
     )
     return TemplateResponse.model_validate(row)
 
@@ -193,6 +230,26 @@ def list_templates(
     admin: UserInDB = Depends(require_admin),
 ):
     return [TemplateResponse.model_validate(t) for t in tdb.list_templates(include_archived)]
+
+
+# ---------------------------------------------------------------------------
+# Student-facing: list available templates
+# (Must be declared BEFORE /templates/{template_id} so FastAPI doesn't try to
+# parse "available" as an int template_id.)
+# ---------------------------------------------------------------------------
+
+@router.get("/templates/available", response_model=List[StudentTemplateResponse])
+def list_available_templates(
+    current_user: UserInDB = Depends(get_current_user),
+):
+    """
+    Return templates assigned to the current user that are still deployable.
+
+    Used by the student's Deploy page to show template cards. Admins can also
+    call this but typically use the full /templates list instead.
+    """
+    rows = tdb.list_student_assignments(current_user.id)
+    return [StudentTemplateResponse.model_validate(r) for r in rows]
 
 
 @router.get("/templates/{template_id}", response_model=TemplateResponse)
@@ -255,26 +312,26 @@ def distribute_template(
         raise HTTPException(status_code=404, detail=f"Template {template_id} not found.")
     if template["status"] == TemplateStatus.archived.value:
         raise HTTPException(status_code=400, detail="Cannot distribute an archived template.")
+    # The dedicated Proxmox template must have finished building before we can
+    # clone from it. Block draft/building/failed templates.
+    if template["status"] != TemplateStatus.published.value or not template.get("template_vmid"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Template is not ready to distribute (status: {template['status']}).",
+        )
 
     if not tdb.get_class(req.class_id):
         raise HTTPException(status_code=404, detail=f"Class {req.class_id} not found.")
 
     # Resolve effective specs + clone mode (request overrides template defaults).
+    # The template is a real Proxmox template, so both full and linked clones
+    # work off it regardless of how it was published.
     cpu_cores = req.cpu_cores or template["default_cpu"]
     ram_mb = req.ram_mb or template["default_ram_mb"]
     clone_mode = (req.clone_mode.value if req.clone_mode else template["clone_mode"])
     full = (clone_mode == CloneMode.full.value)
-    source_vmid = template["source_vmid"]
+    template_vmid = template["template_vmid"]
     os_choice = template["os_choice"]
-
-    # Guard: a linked clone needs the source frozen as a Proxmox template, which
-    # only happens when the template was PUBLISHED as linked. Block a full-mode
-    # template being distributed as linked — Proxmox would reject every clone.
-    if clone_mode == CloneMode.linked.value and template["clone_mode"] != CloneMode.linked.value:
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot distribute as linked: this template was not published as linked.",
-        )
 
     # Guard: block accidental double-distribution (double-click / retry) which
     # would give every student a second identical clone.
@@ -357,7 +414,7 @@ def distribute_template(
             vm_job_id=d["vm_job_id"],
             batch_id=batch["id"],
             student_id=d["student_id"],
-            source_vmid=source_vmid,
+            template_vmid=template_vmid,
             new_vmid=d["new_vmid"],
             vm_name=d["vm_name"],
             os_choice_value=os_choice,
@@ -389,3 +446,268 @@ def get_batch_progress(batch_id: int, admin: UserInDB = Depends(require_admin)):
     if not batch:
         raise HTTPException(status_code=404, detail=f"Batch {batch_id} not found.")
     return BatchProgressResponse.model_validate(batch)
+
+
+# ---------------------------------------------------------------------------
+# Assign template to a class (student self-serve — no VMs created)
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/templates/{template_id}/assign",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        404: {"description": "Template or class not found"},
+        400: {"description": "Template not ready / class empty"},
+    },
+)
+def assign_template(
+    template_id: int,
+    req: AssignRequest,
+    admin: UserInDB = Depends(require_admin),
+):
+    """
+    Grant every student in `class_id` access to deploy from this template.
+
+    This is a metadata-only operation — zero Proxmox calls, instant, no VMs
+    created. Students will see the template on their Deploy page and create
+    VMs on demand. Idempotent: re-assigning resets revoked assignments.
+    """
+    template = tdb.get_template(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail=f"Template {template_id} not found.")
+    if template["status"] != TemplateStatus.published.value or not template.get("template_vmid"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Template is not ready to assign (status: {template['status']}).",
+        )
+    if not tdb.get_class(req.class_id):
+        raise HTTPException(status_code=404, detail=f"Class {req.class_id} not found.")
+
+    cpu_cores = req.cpu_cores or template["default_cpu"]
+    ram_mb = req.ram_mb or template["default_ram_mb"]
+    clone_mode = (req.clone_mode.value if req.clone_mode else template["clone_mode"])
+
+    student_ids = tdb.get_enrolled_student_ids(req.class_id)
+    if not student_ids:
+        raise HTTPException(status_code=400, detail="Class has no enrolled (active) students.")
+
+    for sid in student_ids:
+        tdb.create_or_update_assignment(
+            template_id=template_id,
+            student_id=sid,
+            class_id=req.class_id,
+            assigned_by=admin.id,
+            cpu_cores=cpu_cores,
+            ram_mb=ram_mb,
+            clone_mode=clone_mode,
+        )
+
+    database.log_action(
+        user_id=admin.id, action_type="template.distribute",
+        action="template.assign", target_type="vm_template",
+        target_id=str(template_id),
+        details={
+            "class_id": req.class_id, "students": len(student_ids),
+            "cpu_cores": cpu_cores, "ram_mb": ram_mb, "clone_mode": clone_mode,
+        },
+    )
+    logger.info(
+        "Assigned template %d to class %d: %d students granted access.",
+        template_id, req.class_id, len(student_ids),
+    )
+    return {"assigned": len(student_ids), "template_id": template_id, "class_id": req.class_id}
+
+
+
+
+# ---------------------------------------------------------------------------
+# Revoke assignment
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/templates/{template_id}/revoke",
+    status_code=200,
+)
+def revoke_template_assignments(
+    template_id: int,
+    admin: UserInDB = Depends(require_admin),
+):
+    """
+    Revoke all 'available' assignments for a template. Already-deployed VMs
+    are unaffected (they live in vm_jobs independently).
+    """
+    assignments = tdb.list_template_assignments(template_id)
+    revoked = 0
+    for a in assignments:
+        if a["status"] == "available":
+            tdb.revoke_assignment(a["id"])
+            revoked += 1
+    logger.info("Revoked %d assignments for template %d.", revoked, template_id)
+    return {"revoked": revoked, "template_id": template_id}
+
+
+# ---------------------------------------------------------------------------
+# Admin view: assignments for a template
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/templates/{template_id}/assignments",
+    response_model=List[AssignmentResponse],
+)
+def get_template_assignments(
+    template_id: int,
+    admin: UserInDB = Depends(require_admin),
+):
+    """List all assignments (any status) for a template."""
+    if not tdb.get_template(template_id):
+        raise HTTPException(status_code=404, detail=f"Template {template_id} not found.")
+    rows = tdb.list_template_assignments(template_id)
+    return [AssignmentResponse.model_validate(r) for r in rows]
+
+
+@router.get(
+    "/templates/{template_id}/assignments/count",
+    response_model=AssignmentCountResponse,
+)
+def get_template_assignment_counts(
+    template_id: int,
+    admin: UserInDB = Depends(require_admin),
+):
+    """Quick summary counts for a template's assignments."""
+    if not tdb.get_template(template_id):
+        raise HTTPException(status_code=404, detail=f"Template {template_id} not found.")
+    return AssignmentCountResponse.model_validate(tdb.count_template_assignments(template_id))
+
+
+# ---------------------------------------------------------------------------
+# Deploy a single VM from a template (admin OR student with assignment)
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/templates/{template_id}/deploy",
+    response_model=VMJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        403: {"description": "Student does not have access to this template"},
+        404: {"description": "Template not found"},
+        400: {"description": "Template not ready / not published"},
+        409: {"description": "Student already deployed from this template"},
+        502: {"description": "Could not reach Proxmox to allocate a VMID"},
+    },
+)
+def deploy_template(
+    template_id: int,
+    req: DeployFromTemplateRequest,
+    current_user: UserInDB = Depends(get_current_user),
+):
+    """
+    Deploy ONE VM from a published template.
+
+    - **Admin**: can deploy any published template (unchanged behaviour).
+    - **Student**: can deploy only if they have an 'available' assignment for
+      this template. On success the assignment is marked 'deployed'. Students
+      can adjust CPU/RAM from the admin-set defaults.
+
+    The VM lands in vm_jobs like any other provision, so the dashboard /
+    console / RDP all work unchanged.
+    """
+    template = tdb.get_template(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail=f"Template {template_id} not found.")
+    if template["status"] != TemplateStatus.published.value or not template.get("template_vmid"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Template is not ready to deploy (status: {template['status']}).",
+        )
+
+    is_admin = current_user.role == "admin"
+    assignment = None
+
+    if not is_admin:
+        # Student path: must have an assignment (available or previously deployed)
+        assignment = tdb.get_assignment(template_id, current_user.id)
+        if not assignment or assignment["status"] not in ("available", "deployed"):
+            raise HTTPException(
+                status_code=403,
+                detail="You don't have access to deploy this template.",
+            )
+
+    # Resolve specs: student can override CPU/RAM from assignment defaults;
+    # admin overrides from template defaults.
+    if is_admin:
+        cpu_cores = req.cpu_cores or template["default_cpu"]
+        ram_mb = req.ram_mb or template["default_ram_mb"]
+        clone_mode = (req.clone_mode.value if req.clone_mode else template["clone_mode"])
+    else:
+        cpu_cores = req.cpu_cores or assignment["cpu_cores"]
+        ram_mb = req.ram_mb or assignment["ram_mb"]
+        clone_mode = assignment["clone_mode"]
+
+    full = (clone_mode == CloneMode.full.value)
+    template_vmid = template["template_vmid"]
+    os_choice = template["os_choice"]
+
+    # Allocate a VMID under the cross-request lock (excludes DB-reserved ids).
+    with _vmid_allocation_lock() as locked:
+        if not locked:
+            logger.warning("Proceeding with deploy VMID allocation WITHOUT lock (Redis unavailable).")
+        try:
+            proxmox._ensure_authenticated()
+            new_vmid = proxmox.get_free_vmids(
+                count=1,
+                node=_DEFAULT_NODE,
+                extra_reserved=database.get_reserved_vmids(),
+            )[0]
+        except Exception as exc:
+            logger.error("Could not allocate a VMID for template deploy: %s", exc)
+            raise HTTPException(status_code=502, detail="Could not reach Proxmox to allocate a VMID.")
+
+        request_payload = {
+            "vm_name": req.vm_name,
+            "os_choice": os_choice,
+            "cpu_cores": cpu_cores,
+            "ram_mb": ram_mb,
+            "node": _DEFAULT_NODE,
+            "deployed_from_template": template_id,
+        }
+        # Assigned template deploys bypass the per-student daily quota (the
+        # admin explicitly granted access) — use expiry_hours=None same as
+        # teacher-distributed clones.
+        vm_job_id = database.create_vm_job(
+            user_id=current_user.id,
+            vmid=new_vmid,
+            vm_name=req.vm_name,
+            os_choice=os_choice,
+            request_payload=request_payload,
+            expiry_hours=_CLONE_LEASE_HOURS,
+        )
+
+    deploy_template_for_user.delay(
+        job_id=vm_job_id,
+        user_id=current_user.id,
+        template_vmid=template_vmid,
+        new_vmid=new_vmid,
+        vm_name=req.vm_name,
+        os_choice_value=os_choice,
+        cpu_cores=cpu_cores,
+        ram_mb=ram_mb,
+        node=_DEFAULT_NODE,
+        full=full,
+    )
+
+    database.log_action(
+        user_id=current_user.id, action_type="vm.create",
+        action="template.deploy", target_type="vm_job",
+        target_id=str(vm_job_id),
+        details={
+            "template_id": template_id, "template_vmid": template_vmid,
+            "vmid": new_vmid, "vm_name": req.vm_name, "clone_mode": clone_mode,
+            "is_student_deploy": not is_admin,
+        },
+    )
+    logger.info(
+        "Deploying template %d for %s '%s': template vmid=%d → new vmid=%d (job %d).",
+        template_id, "student" if not is_admin else "admin",
+        current_user.username, template_vmid, new_vmid, vm_job_id,
+    )
+    return VMJobResponse.model_validate(database.get_vm_job(vm_job_id))

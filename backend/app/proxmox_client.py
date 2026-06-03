@@ -784,12 +784,18 @@ class ProxmoxClient:
                             if addr_info.get("ip-address-type") != "ipv4":
                                 continue
                             ip = addr_info.get("ip-address", "")
-                            # Skip loopback even if interface name was different
-                            if ip and not ip.startswith("127."):
-                                logger.info(
-                                    "Got IP %s for vmid=%d via guest agent.", ip, vmid
-                                )
-                                return ip
+                            # Skip loopback, APIPA/link-local, and unset IPs
+                            if not ip or ip.startswith("127.") or ip.startswith("169.254.") or ip == "0.0.0.0":
+                                if ip and ip.startswith("169.254."):
+                                    logger.debug(
+                                        "Skipping APIPA address %s for vmid=%d, waiting for DHCP…",
+                                        ip, vmid,
+                                    )
+                                continue
+                            logger.info(
+                                "Got IP %s for vmid=%d via guest agent.", ip, vmid
+                            )
+                            return ip
 
             except Exception as exc:
                 # Agent not ready yet — this is expected right after boot

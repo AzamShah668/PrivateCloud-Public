@@ -7,15 +7,21 @@ import {
   createTemplate,
   updateTemplate,
   distributeTemplate,
+  deployFromTemplate,
   getBatchProgress,
   listClasses,
   getClass,
   createClass,
   enrollStudents,
   unenrollStudent,
+  listAvailableTemplates,
+  assignTemplate,
+  revokeTemplateAssignments,
   type CreateTemplateBody,
   type UpdateTemplateBody,
   type DistributeBody,
+  type DeployFromTemplateBody,
+  type AssignBody,
 } from "@/api/templates";
 
 /** Extract a user-friendly message from a ky HTTPError or generic Error. */
@@ -35,11 +41,12 @@ async function extractErrorMessage(err: unknown, fallback: string): Promise<stri
 // Templates
 // ---------------------------------------------------------------------------
 
-export function useTemplates(includeArchived = false) {
+export function useTemplates(includeArchived = false, enabled = true) {
   return useQuery({
     queryKey: ["templates", { includeArchived }],
     queryFn: () => listTemplates(includeArchived),
     refetchInterval: 30_000,
+    enabled,
   });
 }
 
@@ -57,7 +64,7 @@ export function useCreateTemplate() {
     mutationFn: (body: CreateTemplateBody) => createTemplate(body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["templates"] });
-      toast.success("Template published");
+      toast.success("Building Proxmox template — this takes a minute. It'll show 'published' when ready.");
     },
     onError: async (err) => {
       toast.error(await extractErrorMessage(err, "Failed to publish template"));
@@ -95,6 +102,22 @@ export function useDistributeTemplate() {
   });
 }
 
+/** Deploy a single VM from a published template (admin self-serve). */
+export function useDeployFromTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: DeployFromTemplateBody }) =>
+      deployFromTemplate(id, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["vms"] });
+      toast.success("Deploying VM from template — provisioning started");
+    },
+    onError: async (err) => {
+      toast.error(await extractErrorMessage(err, "Failed to deploy from template"));
+    },
+  });
+}
+
 /** Poll a batch's progress while any clone is still in flight. */
 export function useBatchProgress(batchId: number | null) {
   return useQuery({
@@ -104,6 +127,51 @@ export function useBatchProgress(batchId: number | null) {
     refetchInterval: (query) => {
       const status = query.state.data?.status;
       return status === "in_progress" ? 4_000 : false;
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Student self-serve — assigned templates
+// ---------------------------------------------------------------------------
+
+/** Fetch templates assigned to the current user (student Deploy page). */
+export function useStudentTemplates(enabled = true) {
+  return useQuery({
+    queryKey: ["student-templates"],
+    queryFn: listAvailableTemplates,
+    refetchInterval: 30_000,
+    enabled,
+  });
+}
+
+/** Admin: assign a template to every student in a class. */
+export function useAssignTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: AssignBody }) =>
+      assignTemplate(id, body),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["templates"] });
+      toast.success(`Assigned template to ${res.assigned} student(s)`);
+    },
+    onError: async (err) => {
+      toast.error(await extractErrorMessage(err, "Failed to assign template"));
+    },
+  });
+}
+
+/** Admin: revoke all available assignments for a template. */
+export function useRevokeAssignments() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (templateId: number) => revokeTemplateAssignments(templateId),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["templates"] });
+      toast.success(`Revoked ${res.revoked} assignment(s)`);
+    },
+    onError: async (err) => {
+      toast.error(await extractErrorMessage(err, "Failed to revoke assignments"));
     },
   });
 }

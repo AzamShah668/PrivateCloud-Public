@@ -1,15 +1,21 @@
-import { useState } from "react";
-import { motion } from "motion/react";
+import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import {
   Copy,
   Plus,
   X,
-  Send,
   Archive,
   Cpu,
   MemoryStick,
   Layers,
   HardDriveDownload,
+  UserPlus,
+  Users,
+  ChevronDown,
+  CheckCircle,
+  Clock,
+  XCircle,
+  ShieldX,
 } from "lucide-react";
 import GlitchText from "@/components/ui/GlitchText";
 import Button from "@/components/ui/Button";
@@ -19,10 +25,12 @@ import {
   useCreateTemplate,
   useUpdateTemplate,
   useDistributeTemplate,
+  useAssignTemplate,
+  useRevokeAssignments,
   useClasses,
   useBatchProgress,
 } from "@/hooks/use-templates";
-import type { CloneMode, VMTemplate } from "@/api/templates";
+import { getAssignmentCounts, type CloneMode, type VMTemplate, type AssignmentCount } from "@/api/templates";
 import { cn } from "@/lib/cn";
 
 const CLONE_STATUS_STYLES: Record<string, string> = {
@@ -35,7 +43,9 @@ const CLONE_STATUS_STYLES: Record<string, string> = {
 export default function AdminTemplatesPage() {
   const { data: templates, isLoading } = useTemplates();
   const [showPublish, setShowPublish] = useState(false);
+  const [assignFor, setAssignFor] = useState<VMTemplate | null>(null);
   const [distributeFor, setDistributeFor] = useState<VMTemplate | null>(null);
+  const [assignmentsFor, setAssignmentsFor] = useState<VMTemplate | null>(null);
   const [activeBatch, setActiveBatch] = useState<number | null>(null);
   const updateTemplate = useUpdateTemplate();
 
@@ -93,7 +103,7 @@ export default function AdminTemplatesPage() {
                       {t.name}
                     </p>
                     <p className="text-[11px] text-muted font-mono">
-                      {t.os_choice} · vmid {t.source_vmid}
+                      {t.os_choice} · template vmid {t.template_vmid ?? "—"}
                     </p>
                   </div>
                 </div>
@@ -108,31 +118,32 @@ export default function AdminTemplatesPage() {
                 <span className={cn("ml-auto uppercase tracking-wide text-[9px] px-1.5 py-0.5 rounded border",
                   t.status === "published" ? "text-accent-green border-accent-green/30"
                   : t.status === "archived" ? "text-muted border-border-subtle"
+                  : t.status === "failed" ? "text-accent-red border-accent-red/30"
                   : "text-accent-amber border-accent-amber/30")}>
                   {t.status}
                 </span>
               </div>
 
+              {/* Assignment count badge */}
+              {t.status === "published" && <AssignmentBadge templateId={t.id} onClick={() => setAssignmentsFor(t)} />}
+
               <div className="flex gap-2">
                 <Button
                   size="sm"
                   className="flex-1"
-                  disabled={t.status === "archived"}
-                  onClick={() => setDistributeFor(t)}
+                  disabled={t.status !== "published"}
+                  title={t.status === "building" ? "Template is still building" : undefined}
+                  onClick={() => setAssignFor(t)}
                 >
-                  <Send className="h-3.5 w-3.5" />
-                  Distribute
+                  <UserPlus className="h-3.5 w-3.5" />
+                  Assign
                 </Button>
-                {t.status !== "archived" && (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => updateTemplate.mutate({ id: t.id, body: { status: "archived" } })}
-                    title="Archive"
-                  >
-                    <Archive className="h-3.5 w-3.5" />
-                  </Button>
-                )}
+                <DropdownActions
+                  template={t}
+                  onDistribute={() => setDistributeFor(t)}
+                  onViewAssignments={() => setAssignmentsFor(t)}
+                  onArchive={() => updateTemplate.mutate({ id: t.id, body: { status: "archived" } })}
+                />
               </div>
             </div>
           ))}
@@ -140,6 +151,12 @@ export default function AdminTemplatesPage() {
       )}
 
       {showPublish && <PublishModal onClose={() => setShowPublish(false)} />}
+      {assignFor && (
+        <AssignModal
+          template={assignFor}
+          onClose={() => setAssignFor(null)}
+        />
+      )}
       {distributeFor && (
         <DistributeModal
           template={distributeFor}
@@ -148,6 +165,12 @@ export default function AdminTemplatesPage() {
             setDistributeFor(null);
             setActiveBatch(batchId);
           }}
+        />
+      )}
+      {assignmentsFor && (
+        <AssignmentsModal
+          template={assignmentsFor}
+          onClose={() => setAssignmentsFor(null)}
         />
       )}
       {activeBatch !== null && (
@@ -174,11 +197,320 @@ function ModeBadge({ mode }: { mode: CloneMode }) {
 }
 
 // ---------------------------------------------------------------------------
+// Assignment badge — shows assigned/deployed counts on template card
+// ---------------------------------------------------------------------------
+
+function AssignmentBadge({ templateId, onClick }: { templateId: number; onClick: () => void }) {
+  const [counts, setCounts] = useState<AssignmentCount | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getAssignmentCounts(templateId)
+      .then((c) => { if (!cancelled) setCounts(c); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [templateId]);
+
+  if (!counts || counts.total === 0) return null;
+
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center gap-2 text-[10px] text-secondary mb-2 px-2 py-1.5 rounded-[var(--radius-md)] bg-elevated/40 border border-border-subtle hover:border-accent-cyan/30 transition-colors cursor-pointer w-full"
+    >
+      <Users className="h-3 w-3 text-accent-cyan" />
+      <span>{counts.total} assigned</span>
+      <span className="text-border-subtle">·</span>
+      <span className="text-accent-green">{counts.deployed} deployed</span>
+      {counts.available > 0 && (
+        <>
+          <span className="text-border-subtle">·</span>
+          <span className="text-accent-amber">{counts.available} pending</span>
+        </>
+      )}
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Dropdown actions — secondary actions for each template card
+// ---------------------------------------------------------------------------
+
+function DropdownActions({
+  template,
+  onDistribute,
+  onViewAssignments,
+  onArchive,
+}: {
+  template: VMTemplate;
+  onDistribute: () => void;
+  onViewAssignments: () => void;
+  onArchive: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="relative">
+      <Button
+        size="sm"
+        variant="secondary"
+        onClick={() => setOpen(!open)}
+        title="More actions"
+      >
+        <ChevronDown className="h-3.5 w-3.5" />
+      </Button>
+      <AnimatePresence>
+        {open && (
+          <>
+            {/* Backdrop to close */}
+            <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+            <motion.div
+              initial={{ opacity: 0, y: -4, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -4, scale: 0.95 }}
+              transition={{ duration: 0.15 }}
+              className="absolute right-0 top-10 z-50 w-48 rounded-[var(--radius-md)] border border-border-subtle bg-surface shadow-lg py-1"
+            >
+              <button
+                className="flex items-center gap-2 w-full px-3 py-2 text-xs text-secondary hover:text-primary hover:bg-elevated/60 transition-colors cursor-pointer"
+                onClick={() => { setOpen(false); onDistribute(); }}
+                disabled={template.status !== "published"}
+              >
+                <HardDriveDownload className="h-3.5 w-3.5" />
+                Auto-Deploy to Class
+              </button>
+              <button
+                className="flex items-center gap-2 w-full px-3 py-2 text-xs text-secondary hover:text-primary hover:bg-elevated/60 transition-colors cursor-pointer"
+                onClick={() => { setOpen(false); onViewAssignments(); }}
+              >
+                <Users className="h-3.5 w-3.5" />
+                View Assignments
+              </button>
+              {template.status !== "archived" && (
+                <>
+                  <div className="border-t border-border-subtle my-1" />
+                  <button
+                    className="flex items-center gap-2 w-full px-3 py-2 text-xs text-accent-red hover:bg-accent-red/10 transition-colors cursor-pointer"
+                    onClick={() => { setOpen(false); onArchive(); }}
+                  >
+                    <Archive className="h-3.5 w-3.5" />
+                    Archive Template
+                  </button>
+                </>
+              )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Assign modal — grant class access (no VMs created)
+// ---------------------------------------------------------------------------
+
+function AssignModal({
+  template,
+  onClose,
+}: {
+  template: VMTemplate;
+  onClose: () => void;
+}) {
+  const { data: classes } = useClasses();
+  const assign = useAssignTemplate();
+  const [classId, setClassId] = useState<number | null>(null);
+  const [cpu, setCpu] = useState(template.default_cpu);
+  const [ram, setRam] = useState(template.default_ram_mb);
+
+  const submit = async () => {
+    if (!classId) return;
+    await assign.mutateAsync({
+      id: template.id,
+      body: {
+        class_id: classId,
+        cpu_cores: cpu,
+        ram_mb: ram,
+        clone_mode: template.clone_mode,
+      },
+    });
+    onClose();
+  };
+
+  const busy = assign.isPending;
+  const guardedClose = () => { if (!busy) onClose(); };
+
+  return (
+    <Modal onClose={guardedClose}>
+      <ModalHeader title={`Assign "${template.name}"`} onClose={guardedClose} />
+      <p className="text-xs text-muted mb-1">
+        Students will see this template on their <strong>Deploy</strong> page and can
+        create a VM whenever they're ready. <em>No VMs are created right now.</em>
+      </p>
+      <p className="text-[10px] text-accent-cyan/80 mb-4 flex items-center gap-1">
+        <Clock className="h-3 w-3" />
+        This is instant — zero Proxmox load, no matter how many students.
+      </p>
+      <div className="space-y-4">
+        <Field label="Class">
+          {(classes ?? []).length === 0 ? (
+            <p className="text-xs text-accent-amber">No classes yet — create one first.</p>
+          ) : (
+            <div className="space-y-1.5 max-h-44 overflow-y-auto">
+              {(classes ?? []).map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => setClassId(c.id)}
+                  className={cn(
+                    "flex items-center justify-between w-full px-3 h-10 rounded-[var(--radius-md)] border transition-all cursor-pointer text-sm",
+                    classId === c.id
+                      ? "border-accent-cyan/50 bg-accent-cyan/10 text-accent-cyan"
+                      : "border-border-subtle bg-elevated/30 text-secondary hover:text-primary",
+                  )}
+                >
+                  <span>{c.name}</span>
+                  <span className="text-muted text-xs">{c.student_count} students</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </Field>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Default vCPU">
+            <NumberInput value={cpu} onChange={setCpu} min={1} max={16} />
+          </Field>
+          <Field label="Default RAM (MB)">
+            <NumberInput value={ram} onChange={setRam} min={512} max={65536} step={512} />
+          </Field>
+        </div>
+
+        <p className="text-[10px] text-muted">
+          Students can adjust CPU/RAM from these defaults when they deploy.
+        </p>
+      </div>
+
+      <div className="flex justify-end gap-2 mt-6">
+        <Button variant="secondary" size="sm" disabled={busy} onClick={guardedClose}>Cancel</Button>
+        <Button
+          size="sm"
+          loading={busy}
+          disabled={!classId}
+          onClick={submit}
+        >
+          <UserPlus className="h-3.5 w-3.5" />
+          Assign to Class
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Assignments modal — per-student assignment status view
+// ---------------------------------------------------------------------------
+
+const ASSIGNMENT_STATUS_MAP: Record<string, { icon: typeof CheckCircle; color: string; label: string }> = {
+  available: { icon: Clock, color: "text-accent-amber", label: "Pending" },
+  deployed: { icon: CheckCircle, color: "text-accent-green", label: "Deployed" },
+  revoked: { icon: XCircle, color: "text-muted", label: "Revoked" },
+};
+
+function AssignmentsModal({
+  template,
+  onClose,
+}: {
+  template: VMTemplate;
+  onClose: () => void;
+}) {
+  const [assignments, setAssignments] = useState<
+    Array<{ id: number; student_id: number; username?: string; status: string; assigned_at: string; vm_job_id?: number }>
+  >([]);
+  const [loading, setLoading] = useState(true);
+  const revoke = useRevokeAssignments();
+
+  useEffect(() => {
+    import("@/api/client").then(({ api }) => {
+      api.get(`templates/${template.id}/assignments`)
+        .json<typeof assignments>()
+        .then((data) => { setAssignments(data); setLoading(false); })
+        .catch(() => setLoading(false));
+    });
+  }, [template.id]);
+
+  const availableCount = assignments.filter((a) => a.status === "available").length;
+
+  return (
+    <Modal onClose={onClose}>
+      <ModalHeader title={`Assignments — "${template.name}"`} onClose={onClose} />
+
+      {/* Summary bar */}
+      <div className="flex items-center gap-4 text-xs mb-4 pb-3 border-b border-border-subtle">
+        <span className="text-muted">{assignments.length} total</span>
+        <span className="text-accent-amber">{assignments.filter((a) => a.status === "available").length} pending</span>
+        <span className="text-accent-green">{assignments.filter((a) => a.status === "deployed").length} deployed</span>
+        {availableCount > 0 && (
+          <Button
+            size="sm"
+            variant="secondary"
+            className="ml-auto"
+            loading={revoke.isPending}
+            onClick={async () => {
+              await revoke.mutateAsync(template.id);
+              onClose();
+            }}
+          >
+            <ShieldX className="h-3 w-3" />
+            Revoke All Pending
+          </Button>
+        )}
+      </div>
+
+      {loading ? (
+        <p className="text-sm text-muted">Loading…</p>
+      ) : assignments.length === 0 ? (
+        <p className="text-sm text-muted">No assignments for this template yet.</p>
+      ) : (
+        <div className="space-y-1.5 max-h-80 overflow-y-auto">
+          {assignments.map((a) => {
+            const cfg = ASSIGNMENT_STATUS_MAP[a.status] ?? ASSIGNMENT_STATUS_MAP.available;
+            const Icon = cfg!.icon;
+            return (
+              <div
+                key={a.id}
+                className="flex items-center justify-between px-3 h-10 rounded-[var(--radius-md)] bg-elevated/40 border border-border-subtle"
+              >
+                <div className="flex items-center gap-2">
+                  <Icon className={cn("h-3.5 w-3.5", cfg!.color)} />
+                  <span className="text-sm text-primary">{a.username ?? `User #${a.student_id}`}</span>
+                </div>
+                <span className={cn(
+                  "text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded border",
+                  a.status === "deployed" ? "text-accent-green border-accent-green/20"
+                  : a.status === "revoked" ? "text-muted border-border-subtle"
+                  : "text-accent-amber border-accent-amber/20",
+                )}>
+                  {cfg!.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="flex justify-end mt-6">
+        <Button variant="secondary" size="sm" onClick={onClose}>Close</Button>
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Publish modal — turn an existing "done" VM into a template
 // ---------------------------------------------------------------------------
 
 function PublishModal({ onClose }: { onClose: () => void }) {
-  const { data: vms } = useAdminVMs();
+  const { data: vms } = useAdminVMs(true);
   const createTemplate = useCreateTemplate();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -210,6 +542,11 @@ function PublishModal({ onClose }: { onClose: () => void }) {
   return (
     <Modal onClose={guardedClose}>
       <ModalHeader title="Publish Template" onClose={guardedClose} />
+      <p className="text-xs text-muted mb-4">
+        This clones the chosen VM into a dedicated, frozen Proxmox template (like the
+        global golden images, but private). Your source VM stays running and usable.
+        Clone mode below is how VMs are later cloned <em>from</em> this template.
+      </p>
       <div className="space-y-4">
         <Field label="Template name">
           <TextInput value={name} onChange={setName} placeholder="ML Lab — PyTorch ready" />
@@ -254,7 +591,7 @@ function PublishModal({ onClose }: { onClose: () => void }) {
               active={cloneMode === "linked"}
               onClick={() => setCloneMode("linked")}
               title="Linked clone"
-              desc="Near-instant, tiny disk. Freezes source."
+              desc="Near-instant, tiny disk. Shares template's base disk."
             />
           </div>
         </Field>

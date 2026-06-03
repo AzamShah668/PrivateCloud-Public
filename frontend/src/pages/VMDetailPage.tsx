@@ -193,6 +193,7 @@ export default function VMDetailPage() {
               onResize={() => setResizeOpen(true)}
               onConsole={() => setConsoleOpen(true)}
               onRemoteDesktop={() => setDesktopOpen(true)}
+              showConsole={!isWindows}
               showRemoteDesktop={isWindows}
               onDelete={() => setDeleteOpen(true)}
               isPending={updateMutation.isPending}

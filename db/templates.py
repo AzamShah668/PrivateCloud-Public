@@ -36,6 +36,7 @@ def create_template(
     source_vmid: int,
     os_choice: str,
     *,
+    template_vmid: Optional[int] = None,
     description: Optional[str] = None,
     clone_mode: str = "full",
     default_cpu: int = 2,
@@ -49,14 +50,15 @@ def create_template(
             cur.execute(
                 """
                 INSERT INTO vm_templates
-                    (owner_id, name, description, source_vmid, os_choice,
-                     clone_mode, default_cpu, default_ram_mb, status,
+                    (owner_id, name, description, source_vmid, template_vmid,
+                     os_choice, clone_mode, default_cpu, default_ram_mb, status,
                      created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING *
                 """,
-                (owner_id, name, description, source_vmid, os_choice,
-                 clone_mode, default_cpu, default_ram_mb, status, now, now),
+                (owner_id, name, description, source_vmid, template_vmid,
+                 os_choice, clone_mode, default_cpu, default_ram_mb, status,
+                 now, now),
             )
             row = cur.fetchone()
         conn.commit()
@@ -98,6 +100,7 @@ def update_template(template_id: int, **fields) -> dict | None:
     col_sql = {
         "name": "name = %s",
         "description": "description = %s",
+        "template_vmid": "template_vmid = %s",
         "clone_mode": "clone_mode = %s",
         "default_cpu": "default_cpu = %s",
         "default_ram_mb": "default_ram_mb = %s",
@@ -422,3 +425,165 @@ def get_batch_progress(batch_id: int) -> dict | None:
             )
             batch["clones"] = cur.fetchall()
     return batch
+
+
+# ---------------------------------------------------------------------------
+# template_assignments — student-facing template access grants
+# ---------------------------------------------------------------------------
+
+def create_or_update_assignment(
+    template_id: int,
+    student_id: int,
+    assigned_by: int,
+    cpu_cores: int,
+    ram_mb: int,
+    clone_mode: str,
+    class_id: Optional[int] = None,
+) -> dict:
+    """
+    Grant a student access to deploy from a template.  Upserts: if the student
+    already has an assignment for this template (even if revoked), it resets to
+    'available' with the new specs.
+    """
+    now = utc_now_iso()
+    with _conn() as conn:
+        with _dict_cursor(conn) as cur:
+            cur.execute(
+                """
+                INSERT INTO template_assignments
+                    (template_id, student_id, class_id, assigned_by,
+                     assigned_at, cpu_cores, ram_mb, clone_mode, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'available')
+                ON CONFLICT (template_id, student_id) DO UPDATE SET
+                    class_id    = EXCLUDED.class_id,
+                    assigned_by = EXCLUDED.assigned_by,
+                    assigned_at = EXCLUDED.assigned_at,
+                    cpu_cores   = EXCLUDED.cpu_cores,
+                    ram_mb      = EXCLUDED.ram_mb,
+                    clone_mode  = EXCLUDED.clone_mode,
+                    vm_job_id   = NULL,
+                    status      = 'available'
+                RETURNING *
+                """,
+                (template_id, student_id, class_id, assigned_by,
+                 now, cpu_cores, ram_mb, clone_mode),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return row
+
+
+def list_student_assignments(student_id: int) -> list[dict]:
+    """
+    Return all templates assigned to a student that are available or deployed
+    (not revoked) AND whose underlying Proxmox template is published.
+    Used by the student's Deploy page. Deployed ones appear with a badge
+    so the student knows they already have a VM from this template.
+    """
+    with _conn() as conn:
+        with _dict_cursor(conn) as cur:
+            cur.execute(
+                """
+                SELECT ta.id,
+                       ta.template_id,
+                       t.name         AS template_name,
+                       t.description,
+                       t.os_choice,
+                       ta.cpu_cores,
+                       ta.ram_mb,
+                       ta.clone_mode,
+                       ta.status,
+                       t.status        AS template_status,
+                       t.template_vmid,
+                       ta.assigned_at,
+                       ta.vm_job_id
+                FROM template_assignments ta
+                JOIN vm_templates t ON t.id = ta.template_id
+                WHERE ta.student_id = %s
+                  AND ta.status IN ('available', 'deployed')
+                  AND t.status = 'published'
+                  AND t.template_vmid IS NOT NULL
+                ORDER BY ta.assigned_at DESC
+                """,
+                (student_id,),
+            )
+            return cur.fetchall()
+
+
+def get_assignment(template_id: int, student_id: int) -> dict | None:
+    """Look up a single assignment for the deploy auth check."""
+    with _conn() as conn:
+        with _dict_cursor(conn) as cur:
+            cur.execute(
+                """
+                SELECT ta.*, t.template_vmid, t.os_choice, t.status AS template_status
+                FROM template_assignments ta
+                JOIN vm_templates t ON t.id = ta.template_id
+                WHERE ta.template_id = %s AND ta.student_id = %s
+                """,
+                (template_id, student_id),
+            )
+            return cur.fetchone()
+
+
+def mark_assignment_deployed(assignment_id: int, vm_job_id: int) -> None:
+    """Mark an assignment as deployed and link the resulting vm_job."""
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE template_assignments
+                SET status = 'deployed', vm_job_id = %s
+                WHERE id = %s
+                """,
+                (vm_job_id, assignment_id),
+            )
+        conn.commit()
+
+
+def revoke_assignment(assignment_id: int) -> None:
+    """Revoke an assignment. Existing deployed VMs are unaffected."""
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE template_assignments SET status = 'revoked' WHERE id = %s",
+                (assignment_id,),
+            )
+        conn.commit()
+
+
+def list_template_assignments(template_id: int) -> list[dict]:
+    """Admin view: all assignments (any status) for a given template."""
+    with _conn() as conn:
+        with _dict_cursor(conn) as cur:
+            cur.execute(
+                """
+                SELECT ta.*, u.username
+                FROM template_assignments ta
+                JOIN users u ON u.id = ta.student_id
+                WHERE ta.template_id = %s
+                ORDER BY u.username
+                """,
+                (template_id,),
+            )
+            return cur.fetchall()
+
+
+def count_template_assignments(template_id: int) -> dict:
+    """Quick counts for an admin badge: available / deployed / revoked."""
+    with _conn() as conn:
+        with _dict_cursor(conn) as cur:
+            cur.execute(
+                """
+                SELECT
+                    COUNT(*)                                       AS total,
+                    COUNT(*) FILTER (WHERE status = 'available')   AS available,
+                    COUNT(*) FILTER (WHERE status = 'deployed')    AS deployed,
+                    COUNT(*) FILTER (WHERE status = 'revoked')     AS revoked
+                FROM template_assignments
+                WHERE template_id = %s
+                """,
+                (template_id,),
+            )
+            return cur.fetchone()
+

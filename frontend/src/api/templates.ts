@@ -1,11 +1,17 @@
 import { api } from "./client";
+import type { VMJob } from "./vms";
 
 // ---------------------------------------------------------------------------
 // Types — Clone-from-Template (Sprint 5)
 // ---------------------------------------------------------------------------
 
 export type CloneMode = "full" | "linked";
-export type TemplateStatus = "draft" | "published" | "archived";
+export type TemplateStatus =
+  | "draft"
+  | "building"
+  | "published"
+  | "failed"
+  | "archived";
 
 export interface VMTemplate {
   id: number;
@@ -13,6 +19,8 @@ export interface VMTemplate {
   name: string;
   description: string | null;
   source_vmid: number;
+  /** Dedicated frozen Proxmox template VMID; null while still building. */
+  template_vmid: number | null;
   os_choice: string;
   clone_mode: CloneMode;
   default_cpu: number;
@@ -100,6 +108,13 @@ export interface DistributeBody {
   clone_mode?: CloneMode;
 }
 
+export interface DeployFromTemplateBody {
+  vm_name: string;
+  cpu_cores?: number;
+  ram_mb?: number;
+  clone_mode?: CloneMode;
+}
+
 // ---------------------------------------------------------------------------
 // API functions
 // ---------------------------------------------------------------------------
@@ -123,6 +138,13 @@ export async function updateTemplate(id: number, body: UpdateTemplateBody): Prom
 
 export async function distributeTemplate(id: number, body: DistributeBody): Promise<CloneBatch> {
   return api.post(`templates/${id}/distribute`, { json: body }).json<CloneBatch>();
+}
+
+export async function deployFromTemplate(
+  id: number,
+  body: DeployFromTemplateBody,
+): Promise<VMJob> {
+  return api.post(`templates/${id}/deploy`, { json: body }).json<VMJob>();
 }
 
 export async function getBatchProgress(batchId: number): Promise<BatchProgress> {
@@ -152,3 +174,59 @@ export async function enrollStudents(classId: number, studentIds: number[]): Pro
 export async function unenrollStudent(classId: number, studentId: number): Promise<void> {
   await api.delete(`classes/${classId}/students/${studentId}`);
 }
+
+// --- Student self-serve template assignments --------------------------------
+
+export interface StudentTemplate {
+  id: number;                 // assignment row id
+  template_id: number;
+  template_name: string;
+  description: string | null;
+  os_choice: string;
+  cpu_cores: number;
+  ram_mb: number;
+  clone_mode: CloneMode;
+  status: "available" | "deployed" | "revoked";
+  template_status: string;
+  template_vmid: number | null;
+  assigned_at: string;
+  vm_job_id: number | null;
+}
+
+export interface AssignBody {
+  class_id: number;
+  cpu_cores?: number;
+  ram_mb?: number;
+  clone_mode?: CloneMode;
+}
+
+export interface AssignmentCount {
+  total: number;
+  available: number;
+  deployed: number;
+  revoked: number;
+}
+
+export async function listAvailableTemplates(): Promise<StudentTemplate[]> {
+  return api.get("templates/available").json<StudentTemplate[]>();
+}
+
+export async function assignTemplate(
+  templateId: number,
+  body: AssignBody,
+): Promise<{ assigned: number; template_id: number; class_id: number }> {
+  return api.post(`templates/${templateId}/assign`, { json: body }).json();
+}
+
+export async function revokeTemplateAssignments(
+  templateId: number,
+): Promise<{ revoked: number; template_id: number }> {
+  return api.post(`templates/${templateId}/revoke`).json();
+}
+
+export async function getAssignmentCounts(
+  templateId: number,
+): Promise<AssignmentCount> {
+  return api.get(`templates/${templateId}/assignments/count`).json<AssignmentCount>();
+}
+

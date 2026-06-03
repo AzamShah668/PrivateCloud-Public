@@ -31,7 +31,9 @@ class CloneMode(str, Enum):
 
 class TemplateStatus(str, Enum):
     draft = "draft"          # created, not yet distributable
-    published = "published"  # frozen (for linked) and ready to distribute
+    building = "building"    # dedicated Proxmox template is being cloned/frozen
+    published = "published"  # frozen Proxmox template ready to clone/distribute
+    failed = "failed"        # the build (clone → qm template) failed
     archived = "archived"    # retired — hidden, no new distributions
 
 
@@ -91,6 +93,7 @@ class TemplateResponse(BaseModel):
     name: str
     description: Optional[str] = None
     source_vmid: int
+    template_vmid: Optional[int] = None  # dedicated frozen Proxmox template VMID
     os_choice: str
     clone_mode: str
     default_cpu: int
@@ -100,6 +103,29 @@ class TemplateResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class DeployFromTemplateRequest(BaseModel):
+    """
+    Deploy a single VM from a published template (admin self-serve, shown as a
+    'Templates' category in the Deploy page). Specs default to the template's
+    defaults; clone mode defaults to the template's clone_mode.
+    """
+    vm_name: str
+    cpu_cores: Optional[int] = Field(default=None, ge=1, le=16)
+    ram_mb: Optional[int] = Field(default=None, ge=512, le=65536)
+    clone_mode: Optional[CloneMode] = None
+
+    @field_validator("vm_name")
+    @classmethod
+    def vm_name_valid(cls, v: str) -> str:
+        # Proxmox-safe VM name: letters/digits/hyphen, 1-30 chars (matches the
+        # student-clone naming rules used elsewhere).
+        if not re.match(r'^[a-zA-Z0-9-]{1,30}$', v):
+            raise ValueError(
+                "vm_name must be 1-30 characters: letters, digits, or hyphens."
+            )
+        return v
 
 
 # ---------------------------------------------------------------------------
@@ -191,3 +217,63 @@ class BatchResponse(BaseModel):
 class BatchProgressResponse(BatchResponse):
     """A batch plus its per-student clone progress."""
     clones: List[CloneJobResponse] = []
+
+
+# ---------------------------------------------------------------------------
+# Assignment schemas (student self-serve deploy)
+# ---------------------------------------------------------------------------
+
+class AssignRequest(BaseModel):
+    """Assign a template to every student in a class (no VMs created)."""
+    class_id: int
+    cpu_cores: Optional[int] = Field(default=None, ge=1, le=16)
+    ram_mb: Optional[int] = Field(default=None, ge=512, le=65536)
+    clone_mode: Optional[CloneMode] = None
+
+
+class StudentTemplateResponse(BaseModel):
+    """What a student sees on the Deploy page: template info + assigned specs."""
+    id: int                             # assignment row id
+    template_id: int
+    template_name: str
+    description: Optional[str] = None
+    os_choice: str
+    cpu_cores: int
+    ram_mb: int
+    clone_mode: str
+    status: str                         # available | deployed
+    template_status: str                # published (always, for visible ones)
+    template_vmid: Optional[int] = None
+    assigned_at: datetime
+    vm_job_id: Optional[int] = None
+
+    model_config = {"from_attributes": True}
+
+
+class AssignmentResponse(BaseModel):
+    """Admin view of an individual assignment."""
+    id: int
+    template_id: int
+    student_id: int
+    username: Optional[str] = None
+    class_id: Optional[int] = None
+    assigned_by: int
+    assigned_at: datetime
+    cpu_cores: int
+    ram_mb: int
+    clone_mode: str
+    vm_job_id: Optional[int] = None
+    status: str
+
+    model_config = {"from_attributes": True}
+
+
+class AssignmentCountResponse(BaseModel):
+    """Quick summary counts for a template's assignments."""
+    total: int = 0
+    available: int = 0
+    deployed: int = 0
+    revoked: int = 0
+
+    model_config = {"from_attributes": True}
+

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useNavigate } from "react-router-dom";
@@ -7,13 +8,46 @@ import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import OSSelector from "./OSSelector";
 import ResourceSliders from "./ResourceSliders";
+import TemplateSelector from "./TemplateSelector";
 import { createVMSchema, type CreateVMValues } from "@/schemas/vm.schema";
 import { useCreateVM } from "@/hooks/use-vms";
+import { useTemplates, useStudentTemplates, useDeployFromTemplate } from "@/hooks/use-templates";
+import { useAuthStore } from "@/stores/auth-store";
+import type { VMTemplate } from "@/api/templates";
 import type { OSValue } from "@/lib/constants";
 
 export default function CreateVMForm() {
   const navigate = useNavigate();
   const createMutation = useCreateVM();
+  const deployMutation = useDeployFromTemplate();
+
+  // Admin sees all published templates; students see their assigned templates.
+  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
+  const adminTemplatesQuery = useTemplates(false, isAdmin);
+  const studentTemplatesQuery = useStudentTemplates(!isAdmin);
+
+  // Normalize student assignments into the VMTemplate shape so TemplateSelector works.
+  const studentAssignments = studentTemplatesQuery.data ?? [];
+  const templates: VMTemplate[] = isAdmin
+    ? (adminTemplatesQuery.data ?? [])
+    : studentAssignments.map((a) => ({
+        id: a.template_id,
+        owner_id: 0,
+        name: a.template_name,
+        description: a.description,
+        source_vmid: 0,
+        template_vmid: a.template_vmid,
+        os_choice: a.os_choice,
+        clone_mode: a.clone_mode,
+        default_cpu: a.cpu_cores,
+        default_ram_mb: a.ram_mb,
+        status: a.template_status as VMTemplate["status"],
+        created_at: a.assigned_at,
+        updated_at: a.assigned_at,
+      }));
+
+  // When a template is selected the form deploys from it instead of the OS.
+  const [templateId, setTemplateId] = useState<number | null>(null);
 
   const {
     register,
@@ -33,6 +67,8 @@ export default function CreateVMForm() {
   });
 
   const values = watch();
+  const selectedTemplate = templates.find((t) => t.id === templateId) ?? null;
+  const isSubmitting = createMutation.isPending || deployMutation.isPending;
 
   function formatRam(mb: number): string {
     return mb >= 1024
@@ -41,6 +77,19 @@ export default function CreateVMForm() {
   }
 
   async function onSubmit(data: CreateVMValues) {
+    if (templateId !== null) {
+      // Deploy from a published template — OS/storage come from the template.
+      const job = await deployMutation.mutateAsync({
+        id: templateId,
+        body: {
+          vm_name: data.vm_name,
+          cpu_cores: data.cpu_cores,
+          ram_mb: data.ram_mb,
+        },
+      });
+      navigate(`/vms/${job.id}`);
+      return;
+    }
     const job = await createMutation.mutateAsync(data);
     navigate(`/vms/${job.id}`);
   }
@@ -73,7 +122,11 @@ export default function CreateVMForm() {
           render={({ field }) => (
             <OSSelector
               value={field.value as OSValue}
-              onChange={(v) => field.onChange(v)}
+              onChange={(v) => {
+                field.onChange(v);
+                // Picking an OS leaves template-deploy mode.
+                setTemplateId(null);
+              }}
             />
           )}
         />
@@ -81,6 +134,21 @@ export default function CreateVMForm() {
           <p className="text-xs text-accent-red mt-1">{errors.os_choice.message}</p>
         )}
       </motion.div>
+
+      {/* Templates (admin or students with assigned templates) */}
+      {templates.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+        >
+          <TemplateSelector
+            templates={templates}
+            selectedId={templateId}
+            onSelect={setTemplateId}
+          />
+        </motion.div>
+      )}
 
       {/* Resource Sliders */}
       <motion.div
@@ -125,17 +193,25 @@ export default function CreateVMForm() {
       >
         <div className="flex items-center justify-between max-w-3xl">
           <div className="flex items-center gap-6 text-xs text-secondary font-mono">
-            <span>{values.os_choice}</span>
+            {selectedTemplate ? (
+              <span className="text-accent-cyan">⬡ {selectedTemplate.name}</span>
+            ) : (
+              <span>{values.os_choice}</span>
+            )}
             <span className="text-border-subtle">|</span>
             <span>{values.cpu_cores} vCPU</span>
             <span className="text-border-subtle">|</span>
             <span>{formatRam(values.ram_mb)}</span>
-            <span className="text-border-subtle">|</span>
-            <span>{values.storage_gb} GB</span>
+            {!selectedTemplate && (
+              <>
+                <span className="text-border-subtle">|</span>
+                <span>{values.storage_gb} GB</span>
+              </>
+            )}
           </div>
-          <Button type="submit" loading={createMutation.isPending}>
+          <Button type="submit" loading={isSubmitting}>
             <Rocket className="h-4 w-4" />
-            Create VM
+            Create Instance
           </Button>
         </div>
       </motion.div>

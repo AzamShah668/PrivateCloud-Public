@@ -320,6 +320,13 @@ def init_db() -> None:
             # ----------------------------------------------------------
 
             # vm_templates — a published, frozen golden VM that can be cloned.
+            # source_vmid    = the admin's working VM the template was built from
+            #                  (left running/usable, untouched).
+            # template_vmid  = the DEDICATED Proxmox template (frozen via
+            #                  `qm template`) that clones are actually made from,
+            #                  exactly like the global golden images 9000/9001 —
+            #                  except this one is private/scoped. NULL while the
+            #                  template is still building.
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS vm_templates (
@@ -328,16 +335,34 @@ def init_db() -> None:
                     name           TEXT NOT NULL,
                     description    TEXT,
                     source_vmid    INTEGER NOT NULL,
+                    template_vmid  INTEGER,
                     os_choice      TEXT NOT NULL,
                     clone_mode     TEXT NOT NULL DEFAULT 'full'
                                    CHECK (clone_mode IN ('full','linked')),
                     default_cpu    INTEGER NOT NULL DEFAULT 2,
                     default_ram_mb INTEGER NOT NULL DEFAULT 2048,
                     status         TEXT NOT NULL DEFAULT 'draft'
-                                   CHECK (status IN ('draft','published','archived')),
+                                   CHECK (status IN ('draft','building','published','failed','archived')),
                     created_at     TIMESTAMPTZ NOT NULL,
                     updated_at     TIMESTAMPTZ NOT NULL
                 )
+                """
+            )
+
+            # Idempotent migrations for databases created before the dedicated
+            # Proxmox-template model: add the template_vmid column and widen the
+            # status CHECK to include the async build lifecycle (building/failed).
+            cur.execute(
+                "ALTER TABLE vm_templates ADD COLUMN IF NOT EXISTS template_vmid INTEGER"
+            )
+            cur.execute(
+                "ALTER TABLE vm_templates DROP CONSTRAINT IF EXISTS vm_templates_status_check"
+            )
+            cur.execute(
+                """
+                ALTER TABLE vm_templates
+                    ADD CONSTRAINT vm_templates_status_check
+                    CHECK (status IN ('draft','building','published','failed','archived'))
                 """
             )
 
@@ -406,6 +431,35 @@ def init_db() -> None:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_clone_jobs_batch   ON clone_jobs (batch_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_clone_jobs_student ON clone_jobs (student_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_enroll_class       ON class_enrollments (class_id)")
+
+            # ----------------------------------------------------------
+            # template_assignments — grants a student access to deploy
+            # from a template without auto-creating the VM.  The admin
+            # "assigns" a template to a class; each student then sees it
+            # on their Deploy page and creates the VM on their own terms.
+            # ----------------------------------------------------------
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS template_assignments (
+                    id            SERIAL PRIMARY KEY,
+                    template_id   INTEGER NOT NULL REFERENCES vm_templates(id),
+                    student_id    INTEGER NOT NULL REFERENCES users(id),
+                    class_id      INTEGER REFERENCES class_groups(id),
+                    assigned_by   INTEGER NOT NULL REFERENCES users(id),
+                    assigned_at   TIMESTAMPTZ NOT NULL,
+                    cpu_cores     INTEGER NOT NULL DEFAULT 2,
+                    ram_mb        INTEGER NOT NULL DEFAULT 2048,
+                    clone_mode    TEXT NOT NULL DEFAULT 'full'
+                                  CHECK (clone_mode IN ('full','linked')),
+                    vm_job_id     INTEGER REFERENCES vm_jobs(id),
+                    status        TEXT NOT NULL DEFAULT 'available'
+                                  CHECK (status IN ('available','deployed','revoked')),
+                    UNIQUE (template_id, student_id)
+                )
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_tpl_assign_student  ON template_assignments (student_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_tpl_assign_template ON template_assignments (template_id)")
 
         conn.commit()
     logger.info("Database schema verified / created successfully.")
@@ -697,17 +751,28 @@ def get_vm_job(job_id: int) -> dict | None:
 
 def get_reserved_vmids() -> set[int]:
     """
-    Return every VMID currently reserved in vm_jobs that is NOT deleted.
+    Return every VMID currently reserved by our system that is NOT deleted.
 
-    A freshly queued clone has a vm_jobs row with its VMID but the VM may not
-    exist on Proxmox yet, so Proxmox's own VMID list won't include it. Callers
-    allocating new VMIDs (bulk clone) must exclude these to avoid handing the
-    same id to two concurrent jobs.
+    Two sources are unioned:
+      - vm_jobs: a freshly queued VM/clone has a row with its VMID but the VM
+        may not exist on Proxmox yet, so Proxmox's own VMID list won't include
+        it.
+      - vm_templates.template_vmid: a template that is still building has an
+        allocated dedicated template VMID that likewise isn't on Proxmox yet.
+
+    Callers allocating new VMIDs (bulk clone, template build, deploy) must
+    exclude these to avoid handing the same id to two concurrent operations.
     """
     with _conn() as conn:
         with _dict_cursor(conn) as cur:
             cur.execute("SELECT vmid FROM vm_jobs WHERE status != 'deleted'")
-            return {int(r["vmid"]) for r in cur.fetchall()}
+            reserved = {int(r["vmid"]) for r in cur.fetchall()}
+            cur.execute(
+                "SELECT template_vmid FROM vm_templates "
+                "WHERE template_vmid IS NOT NULL AND status != 'archived'"
+            )
+            reserved |= {int(r["template_vmid"]) for r in cur.fetchall()}
+            return reserved
 
 
 def list_user_vm_jobs(user_id: int, limit: int = 50) -> list[dict]:

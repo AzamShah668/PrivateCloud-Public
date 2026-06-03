@@ -171,8 +171,29 @@ def list_users(
 )
 def list_all_vms(
     admin: UserInDB = Depends(require_admin),
+    verify_proxmox: bool = Query(
+        default=False,
+        description=(
+            "When true, cross-check each VM's vmid against the live "
+            "Proxmox node and exclude entries whose VM no longer exists."
+        ),
+    ),
 ) -> List[VMJobAdminResponse]:
     jobs = database.list_all_vm_jobs()
+
+    if verify_proxmox:
+        try:
+            from app.proxmox_client import ProxmoxClient
+            px = ProxmoxClient()
+            px._ensure_authenticated()
+            live_vms = px.list_vms()
+            live_vmids = {int(v["vmid"]) for v in live_vms}
+            jobs = [j for j in jobs if j["vmid"] in live_vmids]
+        except Exception as exc:
+            logger.warning(
+                "verify_proxmox failed, returning unfiltered list: %s", exc,
+            )
+
     return [VMJobAdminResponse.model_validate(j) for j in jobs]
 
 

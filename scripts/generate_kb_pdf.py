@@ -3,7 +3,7 @@ Generate the AZNA Private Cloud knowledge-base PDF for the RAG agent.
 
 WHY Q&A (not raw JSON): the RAG pipeline chunks this PDF every ~500 chars and
 embeds each chunk. Self-contained question/answer pairs in plain language give
-the cleanest, most retrievable chunks — the user's question embeds close to the
+the cleanest, most retrievable chunks - the user's question embeds close to the
 stored question, and each answer stands alone. Raw JSON would be sliced
 mid-object and retrieve poorly.
 
@@ -45,18 +45,26 @@ SECTIONS = [
          "delete those VMs; view their live status and IP address; open a "
          "web console (Linux) or remote desktop (Windows) from any device; and "
          "manage everything in plain English through the built-in AI ChatOps "
-         "assistant."),
+         "assistant. Administrators can additionally publish templates, group "
+         "students into classes, and bulk-clone a template to a whole class."),
         ("Who is this platform for?",
          "It is for users who need on-demand virtual machines without dealing "
          "with the underlying virtualization manually. Regular users manage "
          "their own VMs. Administrators additionally manage users, quotas, "
-         "audit logs, platform settings, and the AI knowledge base."),
+         "audit logs, platform settings, the AI knowledge base, VM templates, "
+         "and student classes. A common use case is university labs, where a "
+         "teacher pre-bakes one VM with the lab software and distributes a "
+         "ready-to-run clone to every student in seconds."),
         ("What technology powers the platform?",
-         "At a high level: a FastAPI (Python) backend, a PostgreSQL database, "
-         "asynchronous background jobs via Celery and Redis, virtualization on "
-         "Proxmox VE, and a React and TypeScript web frontend. Remote access "
-         "uses a web terminal for Linux and Apache Guacamole for Windows remote "
-         "desktop."),
+         "A FastAPI (Python) backend, a PostgreSQL database, asynchronous "
+         "background jobs via Celery and Redis, virtualization on Proxmox VE, "
+         "and a React + TypeScript web frontend. Remote access uses a web "
+         "terminal for Linux and Apache Guacamole for Windows remote desktop. "
+         "The AI knowledge base uses ChromaDB-style local vector search."),
+        ("Is this multi-user?",
+         "Yes. Many users can register and log in concurrently. Each user only "
+         "sees their own VMs. Administrators see all VMs across all users and "
+         "can manage the platform globally."),
     ]),
 
     ("2. Accounts and Sign-In", [
@@ -82,12 +90,23 @@ SECTIONS = [
          "Each user can create only a limited number of VMs per day. This daily "
          "quota prevents over-use of the shared hardware. If you reach your "
          "limit you will see a message telling you to try again the next day or "
-         "ask an administrator to raise your quota."),
+         "ask an administrator to raise your quota. Note: VMs created by a "
+         "teacher distributing a template to a class do NOT count against the "
+         "student's daily quota."),
         ("What is the difference between a user and an administrator?",
          "A regular user manages only their own virtual machines. An "
          "administrator can additionally view and manage all users, change "
-         "roles and quotas, review audit logs, adjust platform settings, and "
-         "upload documents to the AI knowledge base."),
+         "roles and quotas, review audit logs, adjust platform settings, "
+         "upload documents to the AI knowledge base, publish VM templates, "
+         "create student classes, and bulk-distribute templates to classes."),
+        ("How is my password stored?",
+         "Passwords are hashed with bcrypt before being saved. The platform "
+         "never stores or sees your plain password. Even an administrator "
+         "looking at the database sees only the hash, not the original."),
+        ("How long does my session last?",
+         "After signing in, the platform issues a JSON Web Token (JWT) that is "
+         "valid for a set period (typically several hours). When it expires you "
+         "are returned to the sign-in page."),
     ]),
 
     ("3. Creating Virtual Machines", [
@@ -113,17 +132,25 @@ SECTIONS = [
         ("How long does it take to create a VM?",
          "Creation runs in the background and is not instant. After you submit, "
          "the VM is 'queued', then provisioned on the virtualization host, then "
-         "becomes 'running'. Linux VMs are usually ready in a few minutes; "
-         "Windows VMs can take longer, especially during first-boot setup."),
+         "becomes 'running'. Linux VMs are usually ready in 1-3 minutes; "
+         "Windows VMs can take 5-10 minutes, especially during first-boot setup."),
         ("What do the VM statuses mean?",
          "'queued' means the request is accepted and waiting to be provisioned. "
-         "'running' (or 'done') means the VM is up. 'stopped' means it is "
-         "powered off. 'failed' means provisioning hit an error; the error "
-         "message explains what went wrong (for example a resource limit)."),
+         "'running' (or 'done') means the VM is up and ready. 'stopped' means "
+         "it is powered off. 'failed' means provisioning hit an error; the "
+         "error message explains what went wrong (for example a resource "
+         "limit). 'deleted' means the VM has been destroyed."),
         ("Must I confirm the operating system before a VM is created?",
          "Yes. The AI assistant will never guess the operating system. If you "
          "ask it to create a VM without naming the OS, it asks you to pick one "
          "first. This prevents accidentally creating the wrong kind of machine."),
+        ("What happens behind the scenes when I create a VM?",
+         "The backend gets a unique VM ID from Proxmox, records the request in "
+         "the database with status 'queued', and immediately returns. A Celery "
+         "background worker then clones the appropriate golden image (Ubuntu or "
+         "Windows), applies your CPU/memory/disk, starts the VM, waits for the "
+         "guest agent to report an IP, and writes the IP and login details back "
+         "to the database. Your dashboard updates as each stage completes."),
     ]),
 
     ("4. Managing Virtual Machines", [
@@ -134,7 +161,7 @@ SECTIONS = [
         ("How do I resize a VM (change CPU, memory, or disk)?",
          "Open the VM and use the resize option to change its vCPUs, memory, or "
          "disk within the allowed limits. Resizing generally requires the VM to "
-         "be restarted for the new resources to take effect."),
+         "be stopped first, and on restart the new resources take effect."),
         ("How do I delete a VM?",
          "Delete it from the VM's page or ask the AI assistant. Deletion is "
          "permanent and destroys the VM, so the assistant always asks you to "
@@ -148,13 +175,22 @@ SECTIONS = [
          "started. Newly created or just-started VMs may show 'Pending' for a "
          "short time. Refreshing the VM page lets the platform re-check and fill "
          "in the IP automatically once it becomes available."),
+        ("What is the 2-hour auto-expire on my VM?",
+         "Regular user-created VMs are leased for 2 hours by default. After "
+         "the lease elapses a background scheduler automatically stops the VM "
+         "to free shared resources. You can simply start it again to extend "
+         "the session. VMs cloned from a teacher template do NOT auto-expire."),
+        ("Can I see live CPU and memory usage of my VM?",
+         "Yes. The VM detail page polls Proxmox for live status - CPU "
+         "percentage, memory used, uptime, and network in/out - so you see "
+         "real numbers, not just on/off."),
     ]),
 
     ("5. Connecting to Your VMs", [
         ("How do I open the console of a Linux VM?",
          "Open the Linux VM's page and click the console option. A web-based "
-         "terminal opens in your browser, giving you command-line access to the "
-         "VM without installing anything."),
+         "terminal (ttyd) opens in your browser, giving you command-line access "
+         "to the VM without installing anything."),
         ("How do I open the remote desktop of a Windows VM?",
          "Open the Windows VM's page and click the remote desktop option. A "
          "full graphical Windows desktop opens in your browser through Apache "
@@ -162,17 +198,29 @@ SECTIONS = [
         ("Can I connect from my phone or a different device?",
          "Yes. Both the web console and the remote desktop run in the browser "
          "and are designed to work across devices on the same network, so you "
-         "can connect from a laptop, phone, or tablet."),
+         "can connect from a laptop, phone, or tablet. The URLs are rewritten "
+         "to use the host name your browser already trusts, so the connection "
+         "works without VPN or extra setup."),
         ("The console or desktop will not load. What should I check?",
-         "Make sure the VM is running and has an IP address. Newly started VMs "
-         "may need a minute before remote access works. If a Windows desktop "
-         "fails right after creation, give it time to finish first-boot setup, "
-         "then refresh the VM page and try again."),
+         "First, make sure the VM is running and has an IP address. Newly "
+         "started VMs may need a minute before remote access works. If a "
+         "Windows desktop fails right after creation, give it time to finish "
+         "first-boot setup, then refresh the VM page and try again."),
         ("I see 'VM is running but no IP was reported'. What do I do?",
          "Simply refresh the VM page. The platform re-checks the running VM for "
          "its IP and credentials and fills them in automatically, so the banner "
          "clears on its own once the VM's guest agent responds. You do not need "
          "to rebuild the VM."),
+        ("What is ttyd and why is it used for Linux?",
+         "ttyd is a tiny program that streams a Linux terminal into a browser "
+         "tab through WebSockets. It is light and works on any device, so a "
+         "phone can open a Linux shell as easily as a laptop without needing "
+         "any SSH client."),
+        ("What is Guacamole and why is it used for Windows?",
+         "Apache Guacamole is a clientless remote desktop gateway: it speaks "
+         "RDP to the Windows VM on one side and a browser HTML5 canvas on the "
+         "other. The result is a full Windows desktop in a tab, again on any "
+         "device, with no separate RDP client to install."),
     ]),
 
     ("6. The AI ChatOps Assistant", [
@@ -208,6 +256,11 @@ SECTIONS = [
          "restart, delete, list), it performs that action. If your message is a "
          "question about how something works, it searches the knowledge base and "
          "writes a grounded answer that cites its sources."),
+        ("Why does the assistant sometimes refuse to answer?",
+         "When the knowledge base genuinely does not contain an answer, the "
+         "assistant is designed to say so rather than make something up. This "
+         "is by design: a refusal is a sign the system is being honest, not "
+         "broken."),
     ]),
 
     ("7. The Knowledge Base (RAG)", [
@@ -234,18 +287,30 @@ SECTIONS = [
          "It tells you honestly that it could not find the information rather "
          "than inventing an answer. An administrator may then upload a document "
          "that covers the topic."),
+        ("What file types can be uploaded to the knowledge base?",
+         "PDF files (text is extracted automatically) and raw text. Both go "
+         "through the same chunk + embed pipeline so retrieval treats them "
+         "identically once indexed."),
+        ("Why agentic RAG instead of always injecting documents?",
+         "Agentic RAG exposes the knowledge search as a tool the assistant "
+         "calls only when the question needs it. A simple action like 'stop my "
+         "VM' does not waste tokens retrieving from the knowledge base; a "
+         "documentation question does. This keeps responses fast and answers "
+         "focused on the right context."),
     ]),
 
     ("8. Administrator Features", [
         ("What can administrators do that regular users cannot?",
          "Administrators can view all users and all VMs across the platform, "
          "change a user's role or daily quota, suspend or remove users, review "
-         "the audit log of important actions, adjust platform settings, and "
-         "manage the AI knowledge base."),
+         "the audit log of important actions, adjust platform settings, manage "
+         "the AI knowledge base, publish VM templates, create student classes, "
+         "and bulk-distribute templates to classes."),
         ("What is the audit log?",
          "The audit log records important actions on the platform, such as "
-         "logins and VM lifecycle events, with who did what and when. "
-         "Administrators use it to review activity and investigate issues."),
+         "logins, VM lifecycle events, template publishes, and class "
+         "distributions, with who did what and when. Administrators use it to "
+         "review activity and investigate issues."),
         ("How do administrators manage the knowledge base?",
          "Administrators open the Knowledge Base section of the admin console, "
          "upload PDF documents (or paste text), and can see what is indexed and "
@@ -255,20 +320,159 @@ SECTIONS = [
          "Yes. Administrators can adjust runtime platform settings and per-user "
          "daily VM quotas. Changes take effect without needing to restart the "
          "platform."),
+        ("What admin sections are in the sidebar?",
+         "Dashboard (live stats), Virtual Machines (all VMs across users), "
+         "Templates (publish + distribute), Classes (student groups), User "
+         "Management, Audit Logs, Knowledge Base, and Admin Settings."),
+        ("Can an administrator template another user's VM?",
+         "Yes. By design, an administrator is the platform operator and may "
+         "publish ANY user's finished VM as a template. The source VM must be "
+         "in 'done' status. Note that a LINKED-clone template freezes the "
+         "source VM into a Proxmox template irreversibly, so administrators "
+         "should typically use FULL clone mode when templating someone else's "
+         "VM unless they coordinate with the owner."),
     ]),
 
-    ("9. How the System Works (Conceptual)", [
+    ("9. Templates (Clone-from-Template feature)", [
+        ("What is a VM template?",
+         "A template is a frozen, ready-to-use copy of a VM that an "
+         "administrator has built and published. The template captures the "
+         "operating system PLUS any software the administrator pre-installed "
+         "(for example a lab application). Cloning from the template gives "
+         "every student an identical, working environment instantly, instead "
+         "of each student spending 20-30 minutes installing software."),
+        ("Why does this feature exist?",
+         "Classroom labs typically lose the first half-hour of every session "
+         "to students installing or configuring software, with inconsistent "
+         "results. Pre-baking the environment ONCE and cloning it for "
+         "everyone solves this completely: every student gets the same "
+         "working VM at the start of class."),
+        ("How does an administrator publish a template?",
+         "Build a VM, install and configure the software, verify it runs, then "
+         "open the admin Templates page and click 'Publish Template'. Pick the "
+         "finished VM from the list, give the template a name and description, "
+         "choose Full or Linked clone mode, and set default CPU/RAM. The "
+         "template appears in the list and can be distributed."),
+        ("Must the source VM be running or stopped to publish?",
+         "The source VM must be in 'done' status. For Full clone mode the VM "
+         "may stay running. For Linked clone mode the platform converts the "
+         "source into a Proxmox template (irreversible), so the VM should be "
+         "stopped first to avoid an error."),
+        ("What is the difference between Full and Linked clone?",
+         "Full clone makes an independent disk copy. It is robust (the source "
+         "can change or be deleted) and slower (a few minutes per clone, more "
+         "disk used). Linked clone shares the source's base disk and stores "
+         "only deltas: it is near-instant (~30-45 seconds per clone) and uses "
+         "very little disk, but the source VM is frozen as a template and "
+         "cannot be started normally again. Linked is ideal for a 60-minute "
+         "lab; Full is safer for long-lived workloads."),
+        ("Can a published template be edited or removed?",
+         "Yes. Administrators can change a template's name, description, "
+         "default CPU/RAM, or archive it. Archiving hides it from new "
+         "distributions but keeps its history. Existing clones already given "
+         "to students are unaffected."),
+        ("Does a clone count against the student's daily quota?",
+         "No. Teacher-distributed clones intentionally bypass the per-user "
+         "daily VM quota - the whole point is everyone gets one immediately. "
+         "Clones also do not auto-expire by default (no 2-hour stop) because "
+         "the teacher manages their lifecycle."),
+        ("Do students see the clone in their own dashboard?",
+         "Yes. Each clone lands in the student's normal VM list with their "
+         "own access (console for Linux, RDP for Windows), credentials, and "
+         "live status. Students do not need to do anything special - the VM "
+         "is simply already there."),
+    ]),
+
+    ("10. Classes (Student Groups)", [
+        ("What is a class in this platform?",
+         "A class is a reusable group of students. An administrator creates a "
+         "class (for example 'ML-Batch-2026'), enrolls students into it, and "
+         "then distributes templates to the entire class in one action. The "
+         "same class can be reused for many labs."),
+        ("How do I create a class?",
+         "Open the admin Classes page and click 'New Class'. Give it a name "
+         "(letters, digits, spaces, hyphens, underscores; 3-40 characters) "
+         "and an optional description. The class starts empty."),
+        ("How do I add students to a class?",
+         "Open the class and choose students from the active user list. You "
+         "can add multiple students at once. Administrators cannot be enrolled "
+         "as students - the platform blocks this to avoid confusing lineage "
+         "and quota conflicts."),
+        ("How do I remove a student from a class?",
+         "Open the class detail and click the trash icon next to the student's "
+         "name. Removal does not delete any clones the student already "
+         "received from earlier distributions."),
+        ("Can a student belong to more than one class?",
+         "Yes. A student can be enrolled in multiple classes at the same time "
+         "and receive distributions from each."),
+        ("Can I distribute a template to a class with no students?",
+         "No. The platform returns an error explaining the class has no "
+         "active enrolled students. Add at least one student first."),
+    ]),
+
+    ("11. Distributing a Template to a Class", [
+        ("How do I distribute a template to a class?",
+         "Open the admin Templates page, click 'Distribute' on the template, "
+         "pick the class, optionally adjust CPU/RAM, and click 'Clone to "
+         "class'. A progress modal opens that shows each student's clone "
+         "going from queued to cloning to done in real time."),
+        ("How long does distribution take?",
+         "Full clones take roughly 2-4 minutes per VM. Linked clones take "
+         "roughly 30-60 seconds per VM. With the platform processing two "
+         "clones in parallel by default, a 30-student linked distribution "
+         "completes in about 8-10 minutes; a Full distribution in roughly 30 "
+         "minutes."),
+        ("What does the batch progress show?",
+         "For each student: their username, their clone's status (queued, "
+         "cloning, done, failed), the new VM's VM ID, and the IP once "
+         "assigned. There is a progress bar showing how many of the total are "
+         "done. The view polls every few seconds while in progress."),
+        ("What are the possible final states of a distribution?",
+         "Completed (every student succeeded), Failed (every student failed), "
+         "Partial (a mix of done and failed clones), or In Progress (still "
+         "running). Partial usually means a few transient issues - re-running "
+         "the distribution will retry the failed students."),
+        ("Can I distribute the same template to the same class twice?",
+         "Not while a previous distribution is still 'in progress' - the "
+         "platform returns a 409 conflict to prevent duplicate clones. Once "
+         "the first batch finishes (completed, partial, or failed), you can "
+         "distribute again safely."),
+        ("Can I publish a template as Full and distribute as Linked, or vice versa?",
+         "No. The chosen clone mode is fixed at publish time because Linked "
+         "needs the source VM frozen as a Proxmox template. Distributing a "
+         "Full template as Linked returns a 400 with a clear error."),
+        ("What if Proxmox rejects a clone mid-distribution?",
+         "Each failure is recorded on that student's clone job with the exact "
+         "Proxmox error message. Other students' clones continue independently. "
+         "The batch ends as 'partial' so you know some succeeded and some did "
+         "not, and you can re-distribute to pick up the failed students."),
+        ("Why does each student get a unique VM ID?",
+         "The platform pre-allocates a distinct Proxmox VM ID for every "
+         "student before any cloning starts. It also takes a short-lived lock "
+         "so two simultaneous distributions cannot allocate overlapping IDs. "
+         "This way no two students collide on the same hypervisor slot."),
+        ("Why are clones of the same template run sequentially?",
+         "Proxmox holds an exclusive lock on the source VM's config during "
+         "every clone read. Two simultaneous clones from the same source "
+         "would race on that lock and one would fail. The platform "
+         "automatically serializes same-source clones with a Redis lock so "
+         "they queue politely. Clones from DIFFERENT templates still run in "
+         "parallel."),
+    ]),
+
+    ("12. How the System Works (Conceptual)", [
         ("How does VM provisioning work end to end?",
          "When you request a VM, the backend records the request and hands the "
-         "slow work to a background worker. The worker creates the VM on the "
-         "virtualization host, waits for it to come up, and records its IP and "
-         "access details. Your dashboard reflects each stage, from queued to "
-         "running."),
+         "slow work to a Celery background worker. The worker clones the OS "
+         "golden image, waits for it to come up, applies your CPU/RAM, starts "
+         "the VM, polls the guest agent for an IP, and records access details. "
+         "Your dashboard reflects each stage from queued to running."),
         ("Why is VM creation asynchronous?",
          "Provisioning a VM takes time (cloning an image, booting, network "
          "setup). Doing it in the background means the web request returns "
          "immediately with a 'queued' status, and you can keep using the "
-         "platform while the VM is being built."),
+         "platform while the VM is being built. Without this, a busy moment "
+         "would tie up every web worker and freeze the platform."),
         ("How does the AI assistant work behind the scenes?",
          "It is an AI agent with tools. For actions it calls the platform's own "
          "VM functions. For questions it searches the knowledge base, then a "
@@ -284,14 +488,47 @@ SECTIONS = [
          "virtual machines run on local virtualization, and the knowledge-base "
          "search runs locally rather than sending your documents to an outside "
          "search service."),
+        ("Why does cloning need an exclusive lock on the source VM?",
+         "Proxmox takes an OS-level file lock on the source VM's config file "
+         "for the duration of a clone read to guarantee a consistent snapshot. "
+         "If two clones tried to read the same source at the same time, the "
+         "second would time out on that lock. The platform serializes these "
+         "automatically so this is invisible to users."),
+        ("Why does the platform pre-allocate VM IDs before fan-out?",
+         "If each Celery worker asked Proxmox 'give me a free ID' independently, "
+         "two workers might receive the same ID and one would fail at clone "
+         "time. Pre-allocating all IDs in a single locked step before any "
+         "cloning starts guarantees uniqueness."),
+        ("Why does the platform use Postgres advisory locks during startup?",
+         "When several worker processes start at once they each try to "
+         "verify-and-update the database schema, which can deadlock on the "
+         "ALTER TABLE statements. A Postgres advisory lock makes only one "
+         "process run the schema setup at a time; the others queue and then "
+         "see the schema is ready."),
     ]),
 
-    ("10. Troubleshooting", [
+    ("13. Troubleshooting - Account and Sign-In", [
         ("My login keeps failing even with the right password.",
          "Re-check capitalization and that you are using the correct account. "
          "If valid credentials fail for everyone, the sign-in service may be "
          "down; ask an administrator to check the platform. A single wrong "
          "attempt simply shows 'Invalid username or password'."),
+        ("I get 'Could not validate credentials. Please log in again.'",
+         "Your session token has expired or the backend was restarted. Sign "
+         "in again to get a fresh token. There is no data loss - everything "
+         "you saved is still there."),
+        ("I registered but I do not have admin access.",
+         "Only the very first user on a fresh database is auto-promoted to "
+         "admin. If another user registered first, you start as a regular "
+         "user. An administrator can promote you, or in a fresh install the "
+         "first registration becomes admin automatically."),
+        ("The admin sidebar items are missing for my account.",
+         "Your role is 'user', not 'admin'. Ask an existing administrator to "
+         "promote you. After your role changes, sign out and sign in again so "
+         "the new permissions take effect."),
+    ]),
+
+    ("14. Troubleshooting - VM Creation and Lifecycle", [
         ("My VM is stuck in 'queued' for a long time.",
          "Provisioning can take a few minutes, and only a limited number of VMs "
          "build at once, so during busy periods yours may wait its turn. If it "
@@ -299,20 +536,201 @@ SECTIONS = [
          "background worker."),
         ("My VM shows 'failed'. What now?",
          "Open the VM to read its error message, which explains the cause (for "
-         "example exceeding a resource limit). Adjust the request accordingly "
-         "and try creating the VM again, or ask an administrator for help."),
-        ("The assistant says the knowledge base is unavailable.",
-         "This means no documents are ready yet or the knowledge service is "
-         "still starting. An administrator needs to upload documents under the "
-         "Knowledge Base section. Once ready, ask your question again."),
+         "example exceeding a resource limit, or a temporary hypervisor issue). "
+         "Adjust the request accordingly and try creating the VM again, or ask "
+         "an administrator for help."),
+        ("My VM failed with 'MAX X vcpus allowed per VM on this node'.",
+         "The Proxmox host has a per-VM CPU cap. Re-create the VM with fewer "
+         "vCPUs and it will succeed. An administrator can also raise the cap "
+         "on the host, but lowering your request is the quicker fix."),
+        ("My VM created successfully but the dashboard shows 'VM is running but no IP was reported'.",
+         "This means provisioning finished but the guest agent did not "
+         "respond within the polling window. Simply refresh the VM page: the "
+         "platform automatically re-checks the running VM and fills in the IP "
+         "and credentials when the agent responds. No rebuild needed."),
+        ("After provisioning failed, the IP and credentials are blank forever.",
+         "The platform now self-heals this on both the next page load (GET) "
+         "and on the next action (start/restart). Refresh the VM page or "
+         "trigger a start; the IP and credentials are recovered automatically "
+         "if the VM is actually running."),
+        ("My VM auto-stopped after a couple of hours.",
+         "Regular user VMs have a 2-hour lease and are automatically stopped "
+         "by a background scheduler to free shared resources. Simply start "
+         "the VM again from your dashboard. Teacher-distributed clones do "
+         "NOT have this lease."),
+        ("Daily quota exceeded - I cannot create more VMs today.",
+         "Each user has a daily VM creation cap (default 3) to prevent "
+         "over-use of shared hardware. The cap resets at midnight UTC. An "
+         "administrator can raise your per-user quota if you legitimately "
+         "need more."),
+    ]),
+
+    ("15. Troubleshooting - Remote Access", [
         ("Remote desktop or console works on one device but not another.",
          "Make sure both devices are on the same network and the VM is running "
          "with an IP. The browser-based console and desktop are built to work "
          "across devices, but a VM that is still booting will not accept "
          "connections yet."),
+        ("Windows desktop fails with 'VM is missing IP or credentials'.",
+         "The credentials may not have been written during a failed initial "
+         "provision. Reloading the VM page triggers an automatic backfill of "
+         "the username and password from the platform's stored defaults for "
+         "that OS. The desktop button then works without rebuilding."),
+        ("Console (Linux terminal) loads then disconnects immediately.",
+         "Usually the VM is still booting or the guest agent has not started "
+         "sshd yet. Wait 30-60 seconds after the VM reaches 'running' and "
+         "try again. If it persists, restart the VM."),
+        ("Console URL works on the laptop but not on my phone.",
+         "The platform rewrites the console URL to use the hostname your "
+         "browser already used, so it should work on any device. If it does "
+         "not, check that your phone is on the same network as the host."),
     ]),
 
-    ("11. Quick Reference", [
+    ("16. Troubleshooting - AI ChatOps", [
+        ("The assistant says 'knowledge base is unavailable'.",
+         "No documents are uploaded yet or the knowledge service is still "
+         "starting. An administrator needs to upload at least one PDF or "
+         "text document under the Knowledge Base section. Once indexed, "
+         "ask your question again."),
+        ("The assistant gave me a wrong answer about a Proxmox command.",
+         "If the answer was NOT cited as 'From Knowledge Base', it came from "
+         "the model's general training and may be wrong about this specific "
+         "platform. Ask the question again and the assistant should search "
+         "the knowledge base. If the knowledge base lacks the topic, an "
+         "administrator should upload a document covering it."),
+        ("The assistant refused to act on 'delete everything'.",
+         "Destructive bulk actions require explicit confirmation by name or "
+         "by clear scope. The assistant deliberately refuses ambiguous "
+         "destructive instructions to prevent accidental loss."),
+        ("The assistant created a VM with the wrong specs.",
+         "If you did not specify CPU/RAM/disk it used the per-OS defaults "
+         "(see 'What happens if I do not specify CPU, memory, or disk?'). "
+         "You can resize the VM after creation, or be more explicit in the "
+         "next request."),
+    ]),
+
+    ("17. Troubleshooting - Templates and Distribution", [
+        ("'Source VM must be in done status' when publishing a template.",
+         "The chosen source VM is queued, failed, or deleted. Pick a VM "
+         "whose status is 'done' (fully provisioned). For Linked clone mode "
+         "the VM should also be stopped before publishing."),
+        ("'Cannot distribute as linked: this template was not published as linked.'",
+         "Clone mode is fixed at publish time because Linked needs the "
+         "source frozen as a Proxmox template. Either publish a new template "
+         "with Linked mode, or distribute this template as Full."),
+        ("'A distribution for this template and class is already in progress.'",
+         "A previous distribution of the same template to the same class has "
+         "not finished yet. Wait until the batch reaches Completed, Failed, "
+         "or Partial, then distribute again. This guard prevents accidental "
+         "duplicate clones (a double-click)."),
+        ("'Class has no enrolled active students.'",
+         "Either the class is empty or all enrolled students are suspended/"
+         "deleted. Add at least one active student to the class and retry."),
+        ("'Could not reach Proxmox to allocate VMIDs.'",
+         "Proxmox was briefly unreachable when the platform tried to "
+         "pre-allocate VM IDs for the distribution. Try again in a moment. "
+         "If it persists, check the Proxmox host is up and reachable from "
+         "the backend."),
+        ("Some students' clones failed with 'unable to find configuration file for VM X'.",
+         "The source VM was deleted from Proxmox while still recorded as "
+         "'done' in our database. Re-publish a template from a different "
+         "live VM and re-distribute. The platform records the exact error "
+         "on each failed clone so you can identify this case quickly."),
+        ("Some students' clones failed with 'can't lock file ... got timeout'.",
+         "Proxmox itself holds an exclusive lock on the source VM's config "
+         "during cloning. The platform serializes same-source clones with "
+         "a Redis lock to avoid this, so the most common cause today is "
+         "another administrator distributing the same template at the same "
+         "moment. Wait and re-distribute; the failures will succeed on retry."),
+        ("Batch finished as 'partial' - what do I do?",
+         "Partial means some clones succeeded and some failed. The student "
+         "view shows clearly which clones are usable. You can re-distribute "
+         "the template to the same class: students who already have a clone "
+         "will get a SECOND clone, so for now the practical workaround is "
+         "to manually delete the failed clones and re-distribute. A native "
+         "retry-just-failed endpoint is on the future-work list."),
+    ]),
+
+    ("18. Troubleshooting - Knowledge Base / RAG", [
+        ("'There was an error parsing the body' when I upload text.",
+         "The text contained a character your tool did not encode as UTF-8 "
+         "(an em-dash, smart quote, etc.). Either save the text to a UTF-8 "
+         "file and upload via file, or replace special characters with plain "
+         "ASCII equivalents."),
+        ("After uploading a PDF, the assistant still says 'not in knowledge base'.",
+         "Confirm the upload reported a chunk count greater than zero. If the "
+         "PDF is image-only (scanned pages with no embedded text), the "
+         "extractor cannot pull any text. Re-export the PDF with selectable "
+         "text, or paste the content as text via upload-text."),
+        ("How many pages or how big a PDF can I upload?",
+         "There is no hard cap, but very large PDFs take longer to chunk and "
+         "embed. A practical maximum per document is a few hundred pages; "
+         "split bigger material into smaller logical PDFs for cleaner retrieval."),
+        ("How do I remove a document from the knowledge base?",
+         "Open the admin Knowledge Base page and use the delete control next "
+         "to the source. All chunks for that source are removed from the "
+         "vector index in one operation."),
+    ]),
+
+    ("19. Troubleshooting - Installation and Docker", [
+        ("'docker compose up --build' fails at 'exporting to image'.",
+         "Docker Desktop's build cache is out of sync with its image store. "
+         "This is not a code bug. Run 'docker builder prune -af' to clear "
+         "only the build cache (NOT your data) and retry. If it persists, "
+         "Docker Desktop Troubleshoot menu has a 'Clean / Purge data' "
+         "option. Volumes and project files are not affected by builder prune."),
+        ("'no such service: build' when running docker compose.",
+         "The correct flag is '--build' (two dashes, no space). 'docker "
+         "compose up -- build' is parsed as service name 'build' which "
+         "does not exist. Use 'docker compose up --build' instead."),
+        ("Backend container restarts immediately.",
+         "Check 'docker logs <backend-container>' for the error. The most "
+         "common causes are missing environment variables (PROXMOX_HOST, "
+         "OPENROUTER_API_KEY) or Postgres not yet ready. The healthcheck "
+         "waits for Postgres so this is rare in normal operation."),
+        ("Celery worker container is unhealthy.",
+         "The Celery worker has its own healthcheck. If it stays unhealthy, "
+         "check 'docker logs <celery-worker>' - common causes are an "
+         "import error in a new task file or Redis not yet reachable."),
+        ("Frontend serves but API calls 404.",
+         "The frontend Nginx proxies '/api' to the backend container. If "
+         "you changed the backend service name or port, also update the "
+         "Nginx config. Otherwise check that the backend container is up "
+         "and healthy."),
+    ]),
+
+    ("20. Common Patterns and Architecture (User-Friendly)", [
+        ("Why is the database schema applied on startup?",
+         "The backend runs CREATE TABLE IF NOT EXISTS and ALTER TABLE "
+         "statements at startup. This means upgrading to a new version is "
+         "just 'pull and restart' - no separate migration step. Existing "
+         "data is preserved; only missing tables or columns are added."),
+        ("Why does the platform reuse the existing VM table for clones?",
+         "Cloned student VMs land in the same vm_jobs table as regular VMs. "
+         "This means the student dashboard, console, remote desktop, "
+         "credentials self-heal, and audit logging all work UNCHANGED for "
+         "cloned VMs - the new feature did not need any rework of these "
+         "existing components."),
+        ("Why are there both 'audit log' and 'activity feed'?",
+         "The audit log is the immutable record of what happened (used for "
+         "compliance and admin review). The activity feed on the dashboard "
+         "is a live view of the most recent events for quick visibility. "
+         "Both read from the same source of truth."),
+        ("Why a single Q&A PDF for the knowledge base?",
+         "RAG retrieval works best when each chunk is a meaningful, "
+         "self-contained unit. A Q&A pair survives chunking gracefully "
+         "because the question states the intent and the answer is "
+         "complete on its own. Long prose articles get cut mid-sentence "
+         "and retrieve poorly."),
+        ("Why does the platform need both Postgres and MySQL?",
+         "Postgres holds the application data (users, VMs, audit, templates, "
+         "etc.). MySQL is a requirement of Apache Guacamole - its database "
+         "schema is published only for MySQL. Treating Guacamole as a "
+         "self-contained add-on with its own DB keeps our main schema "
+         "clean and lets Guacamole upgrade independently."),
+    ]),
+
+    ("21. Quick Reference", [
         ("What operating systems are supported, in short?",
          "Ubuntu 22.04, Ubuntu 24.04, Debian 12, CentOS 9, and Windows 11."),
         ("What are the resource limits, in short?",
@@ -327,6 +745,23 @@ SECTIONS = [
          "Create, start, stop, restart, resize, delete, and list VMs (including "
          "several at once), and answer questions about the platform from the "
          "knowledge base."),
+        ("Distribution speed, in short?",
+         "Linked clone: about 30-60 seconds per VM. Full clone: about 2-4 "
+         "minutes per VM. With 2-way Celery parallelism, a 30-student "
+         "Linked distribution finishes in roughly 8-10 minutes."),
+        ("Auto-expiry, in short?",
+         "Regular user-created VMs auto-stop after 2 hours of lease. "
+         "Teacher-distributed clones do NOT auto-expire."),
+        ("Quota, in short?",
+         "Default 3 VMs per user per day; admins can adjust per user. "
+         "Resets at midnight UTC. Distributed clones do not count."),
+        ("Admin sidebar sections, in short?",
+         "Dashboard, Virtual Machines, Templates, Classes, User Management, "
+         "Audit Logs, Knowledge Base, Admin Settings."),
+        ("Clone mode quick guide, in short?",
+         "Full = independent, robust, slower. Linked = near-instant, tiny "
+         "disk, freezes the source. Pick Linked for short labs; Full for "
+         "long-lived work."),
     ]),
 ]
 
@@ -373,6 +808,11 @@ def build() -> None:
         "This document is the source material for the platform's AI ChatOps "
         "assistant. It is written as self-contained question-and-answer pairs so "
         "the assistant can retrieve precise, accurate answers for users.\n\n"
+        "It covers every major feature: account management, VM creation and "
+        "lifecycle, remote access, AI ChatOps, RAG knowledge base, the admin "
+        "portal, templates and class-based distribution (Sprint 5), and "
+        "extensive troubleshooting for accounts, VM creation, remote access, "
+        "ChatOps, templates, knowledge base, and Docker installation.\n\n"
         "It contains only information that is safe for users to read. It "
         "deliberately excludes passwords, API keys, internal addresses, and any "
         "other sensitive configuration.\n\n"

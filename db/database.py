@@ -101,6 +101,17 @@ def init_db() -> None:
         with conn.cursor() as cur:
 
             # ----------------------------------------------------------
+            # Schema-setup mutex
+            # Multiple processes (FastAPI + each Celery ForkPoolWorker) may
+            # call init_db() concurrently on startup. The CREATE TABLE / ALTER
+            # TABLE DROP CONSTRAINT statements would otherwise deadlock fighting
+            # each other for AccessExclusiveLock. pg_advisory_xact_lock takes a
+            # transaction-scoped lock — exactly one session runs the schema
+            # block at a time; others queue until it commits.
+            # ----------------------------------------------------------
+            cur.execute("SELECT pg_advisory_xact_lock(7501231)")
+
+            # ----------------------------------------------------------
             # users
             # Stores app accounts.  role is either 'user' or 'admin'.
             # daily_quota limits how many VMs a user can create per day.

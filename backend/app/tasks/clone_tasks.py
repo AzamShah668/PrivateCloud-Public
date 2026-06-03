@@ -18,6 +18,12 @@
 # =============================================================================
 
 import logging
+import os
+import time
+import uuid
+from contextlib import contextmanager
+
+import redis
 
 from app.celery_app import celery_app
 from app.proxmox_client import ProxmoxClient, ProxmoxAPIError
@@ -29,6 +35,53 @@ logger = logging.getLogger(__name__)
 
 # One ProxmoxClient per worker process (stateless with token auth).
 proxmox = ProxmoxClient()
+
+# Redis lock to serialise CONCURRENT CLONES OF THE SAME SOURCE VMID.
+# Proxmox itself holds an exclusive flock on /var/lock/qemu-server/lock-<vmid>.conf
+# during the clone operation. Two of our Celery workers cloning the same source
+# at the same time will collide on that file lock — the second clone fails with
+# "can't lock file ... got timeout". This wraps the clone_vm + wait_for_task
+# block in a per-source Redis lock so workers queue politely behind each other
+# (other Celery work — clones of DIFFERENT sources, normal provisions — keeps
+# its full concurrency).
+_redis = redis.Redis.from_url(os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0"))
+_SOURCE_LOCK_KEY = "privatecloud:lock:clone_source:{vmid}"
+_SOURCE_LOCK_WAIT_SECONDS = 600       # how long to wait to acquire the lock
+_SOURCE_LOCK_HOLD_SECONDS = 600       # auto-expire so a crashed worker can't deadlock
+
+
+@contextmanager
+def _source_clone_lock(source_vmid: int):
+    """
+    Acquire an exclusive Redis lock for a given source VMID. Blocks (polling)
+    up to _SOURCE_LOCK_WAIT_SECONDS waiting for it. The lock self-expires
+    after _SOURCE_LOCK_HOLD_SECONDS so a worker crash can't deadlock the system.
+    """
+    key = _SOURCE_LOCK_KEY.format(vmid=source_vmid)
+    token = str(uuid.uuid4())
+    acquired = False
+    deadline = time.time() + _SOURCE_LOCK_WAIT_SECONDS
+    try:
+        while time.time() < deadline:
+            if _redis.set(key, token, nx=True, ex=_SOURCE_LOCK_HOLD_SECONDS):
+                acquired = True
+                break
+            time.sleep(1.0)
+        if not acquired:
+            logger.warning(
+                "Source-VMID lock not acquired for vmid=%d after %ds — proceeding "
+                "unlocked (Proxmox may reject the clone).",
+                source_vmid, _SOURCE_LOCK_WAIT_SECONDS,
+            )
+        yield acquired
+    finally:
+        if acquired:
+            try:
+                # Only release if we still own the token (cheap CAS-style check).
+                if _redis.get(key) == token.encode():
+                    _redis.delete(key)
+            except redis.RedisError:
+                pass
 
 
 def _log_event(user_id, action, target_type, target_id, details):
@@ -93,14 +146,19 @@ def clone_template_for_student(
         )
 
         # ── Clone the template (mode chosen per-template) ────────────────
-        clone_upid = proxmox.clone_vm(
-            template_vmid=source_vmid,
-            new_vmid=new_vmid,
-            name=vm_name,
-            node=node,
-            full=full,
-        )
-        proxmox.wait_for_task(node=node, upid=clone_upid, timeout=300)
+        # Wrap the clone call AND wait_for_task in a per-source Redis lock.
+        # Proxmox flocks /var/lock/qemu-server/lock-<source>.conf for the
+        # duration of the clone — two concurrent clones from the same source
+        # would otherwise fail with "can't lock file ... got timeout".
+        with _source_clone_lock(source_vmid):
+            clone_upid = proxmox.clone_vm(
+                template_vmid=source_vmid,
+                new_vmid=new_vmid,
+                name=vm_name,
+                node=node,
+                full=full,
+            )
+            proxmox.wait_for_task(node=node, upid=clone_upid, timeout=300)
         logger.info("Clone complete for vmid=%d.", new_vmid)
 
         # ── Apply requested CPU / RAM ────────────────────────────────────

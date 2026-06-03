@@ -1,0 +1,23 @@
+Here's the one-liner. Since you don't have an admin account yet, you need to bypass the UI entirely and go straight to the database.
+
+The command
+Replace YOUR_USERNAME with the actual username you registered:
+
+
+docker exec proxmox_postgres psql -U postgres -d proxmox_app -c "UPDATE users SET role='admin' WHERE username='YOUR_USERNAME';"
+That's it. Run it, log out, log back in (so the JWT picks up the new role), and the admin sidebar will appear.
+
+Verify it worked
+
+docker exec proxmox_postgres psql -U postgres -d proxmox_app -c "SELECT id, username, role FROM users;"
+You should see admin in the role column next to your user.
+
+If the container name doesn't match
+The container is named via container_name: proxmox_postgres in docker-compose.yml, so it should be the same on Faizan's Mac. But if you renamed the project or it's running under a different name, list them first:
+
+
+docker ps --format "table {{.Names}}\t{{.Image}}" | grep postgres
+Then swap proxmox_postgres in the command above for whatever name shows up.
+
+Heads-up
+The platform has an auto-promote-first-admin feature — the very first user to register gets role='admin' automatically. So this probably didn't trigger because another user was registered before you, or the DB already had rows. Once you've manually promoted yourself you're fine.

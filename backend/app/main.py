@@ -33,6 +33,7 @@ from app.routes.desktop_routes import router as desktop_router
 from app.routes.knowledge_routes import router as knowledge_router
 from app.routes.template_routes import router as template_router
 from app.routes.class_routes import router as class_router
+from app.routes.setup_routes import router as setup_router
 
 # ---------------------------------------------------------------------------
 # Logging configuration
@@ -135,6 +136,7 @@ app.include_router(template_router)
 
 # Student classes (admin-only):  /classes/*
 app.include_router(class_router)
+app.include_router(setup_router)
 
 
 # ---------------------------------------------------------------------------

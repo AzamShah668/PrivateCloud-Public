@@ -139,6 +139,9 @@ services:
       # built-in ONNX embedding model is cached under ~/.cache/chroma (persisted
       # via the cache volume below) after its one-time ~80 MB download.
       CHROMA_PATH: /home/appuser/app/data/chroma
+      # Fernet key that encrypts secret settings (Proxmox/LLM/Guacamole creds)
+      # stored in the DB by the Setup Wizard. Read from the root .env.
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?set SETTINGS_ENCRYPTION_KEY in .env}
 
     ports:
       - "8000:8000"
@@ -191,6 +194,9 @@ services:
       DB_HOST: postgres
       DB_PORT: "5432"
       CELERY_BROKER_URL: redis://redis:6379/0
+      # Needed so the worker can DECRYPT secret settings (Proxmox token/password)
+      # it reads from the DB. Read from the root .env.
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?set SETTINGS_ENCRYPTION_KEY in .env}
 
     depends_on:
       postgres:

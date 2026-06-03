@@ -22,12 +22,13 @@
 #   5. AuditLogResponse — Pydantic: what the API returns about an audit entry
 # =============================================================================
 
-import os
 from datetime import datetime
 from enum import Enum
 from typing import Optional, Any, Dict
 
 from pydantic import BaseModel, Field, field_validator
+
+from app import config
 
 
 # =============================================================================
@@ -92,7 +93,7 @@ class VMCreateRequest(BaseModel):
     # Proxmox node to create the VM on.
     # Reads PROXMOX_NODE from the environment so it never needs to be
     # hardcoded — changing the .env is enough.
-    node: str = Field(default_factory=lambda: os.getenv("PROXMOX_NODE", "home"))
+    node: str = Field(default_factory=lambda: config.get_config_str("PROXMOX_NODE", "home"))
 
     @field_validator("vm_name")
     @classmethod

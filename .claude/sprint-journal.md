@@ -9,6 +9,8 @@
 
 | # | Date | Title | Sprint | File |
 |---|------|-------|--------|------|
+| 023 | 2026-06-04 | Move .env config into a DB-backed first-run Setup Wizard (encrypted secrets) | 6 | [023-config-and-setup-wizard.md](journal/023-config-and-setup-wizard.md) |
+| 022 | 2026-06-04 | DB↔Proxmox reconciliation — kill the "hallucinated VM" (write-back soft-delete) | 6 | [022-db-proxmox-reconciliation.md](journal/022-db-proxmox-reconciliation.md) |
 | 021 | 2026-06-03 | Templates that are actually Proxmox templates (clone-then-freeze) + admin Deploy-page category | 5 | [021-real-proxmox-templates.md](journal/021-real-proxmox-templates.md) |
 | 020 | 2026-05-27 | Clone-from-Template: Teacher Templates → Bulk-Clone to a Class | 5 | [020-clone-from-template.md](journal/020-clone-from-template.md) |
 | 019 | 2026-05-26 | RAG Knowledge Base Integration into the ChatOps Agent | 4 | [019-rag-knowledge-base-integration.md](journal/019-rag-knowledge-base-integration.md) |

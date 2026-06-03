@@ -60,13 +60,22 @@ export interface AuditLog {
   created_at: string;
 }
 
-export type SettingValueType = "string" | "integer" | "boolean" | "json";
+export type SettingValueType =
+  | "string"
+  | "integer"
+  | "boolean"
+  | "json"
+  | "secret";
 
 export interface PlatformSetting {
   key: string;
   value: string;
   value_type: SettingValueType;
   typed_value: unknown;
+  // Secret-typed settings are masked: value/typed_value are blank and `is_set`
+  // indicates whether a value is configured without revealing it.
+  is_secret?: boolean;
+  is_set?: boolean;
   description: string | null;
   updated_at: string;
   updated_by: number | null;

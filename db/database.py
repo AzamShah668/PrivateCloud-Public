@@ -295,8 +295,19 @@ def init_db() -> None:
                     updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
                     updated_by  INTEGER      REFERENCES users(id) ON DELETE SET NULL,
                     CONSTRAINT system_settings_type_check
-                        CHECK (value_type IN ('string','integer','boolean','json'))
+                        CHECK (value_type IN ('string','integer','boolean','json','secret'))
                 )
+                """
+            )
+            # Migration: widen the value_type CHECK to allow 'secret' on DBs
+            # created before encrypted settings existed. Idempotent.
+            cur.execute(
+                """
+                ALTER TABLE system_settings
+                    DROP CONSTRAINT IF EXISTS system_settings_type_check;
+                ALTER TABLE system_settings
+                    ADD CONSTRAINT system_settings_type_check
+                    CHECK (value_type IN ('string','integer','boolean','json','secret'));
                 """
             )
             cur.execute(
@@ -308,6 +319,22 @@ def init_db() -> None:
                     ('audit.retention_days', '90',    'integer', 'Days to retain audit log entries')
                 ON CONFLICT (key) DO NOTHING
                 """
+            )
+
+            # Seed the operational config that moved out of .env into the DB
+            # (Proxmox connector, LLM provider, VM creds, Guacamole, setup flag).
+            # Single source of truth: db/config_registry.py. Secrets seed empty.
+            from db.config_registry import CONFIG_REGISTRY
+            cur.executemany(
+                """
+                INSERT INTO system_settings (key, value, value_type, description)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (key) DO NOTHING
+                """,
+                [
+                    (ck.key, ck.default, ck.value_type, ck.description)
+                    for ck in CONFIG_REGISTRY
+                ],
             )
 
             # ----------------------------------------------------------
@@ -739,6 +766,45 @@ def update_vm_job(
                 ),
             )
         conn.commit()
+
+
+def mark_vm_job_deleted(job_id: int, reason: str) -> dict | None:
+    """
+    Soft-delete a vm_job by setting status='deleted', used by the
+    DB<->Proxmox reconciliation pass when a VM has vanished from the
+    hypervisor (deleted out-of-band, directly in the Proxmox UI).
+
+    Unlike the generic update_vm_job(), this PRESERVES proxmox_response so the
+    historical snapshot of what the VM was is kept for audit/forensics, and it
+    only *appends* the reconciliation reason to error_message rather than
+    nulling it. Reuses the same VMStatus.deleted semantics as a normal user
+    delete, so reconciled rows drop out of every list that already filters
+    status != 'deleted' (e.g. list_user_vm_jobs).
+
+    Returns the updated row, or None if the job_id does not exist or was
+    already deleted (so the caller can avoid double-auditing).
+    """
+    with _conn() as conn:
+        with _dict_cursor(conn) as cur:
+            cur.execute(
+                """
+                UPDATE vm_jobs
+                SET status        = 'deleted',
+                    error_message = CASE
+                        WHEN error_message IS NULL OR error_message = ''
+                            THEN %s
+                        ELSE error_message || ' | ' || %s
+                    END,
+                    updated_at    = %s
+                WHERE id = %s
+                  AND status <> 'deleted'
+                RETURNING id, user_id, vmid, status
+                """,
+                (reason, reason, utc_now_iso(), job_id),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return row
 
 
 def get_vm_job(job_id: int) -> dict | None:
@@ -1175,6 +1241,10 @@ def _cast_setting_value(value: str, value_type: str):
 def get_setting(key: str):
     """
     Return the cast value for a setting key, or None if the key is unknown.
+
+    Secret-typed settings are transparently DECRYPTED here, so callers
+    (e.g. the config resolver) always receive plaintext. An empty secret
+    (never configured) returns "".
     """
     with _conn() as conn:
         with _dict_cursor(conn) as cur:
@@ -1185,13 +1255,36 @@ def get_setting(key: str):
             row = cur.fetchone()
     if row is None:
         return None
+    if row["value_type"] == "secret":
+        from app.services.secret_crypto import decrypt
+        return decrypt(row["value"])
     return _cast_setting_value(row["value"], row["value_type"])
+
+
+def _present_setting_row(row: dict) -> dict:
+    """
+    Shape a raw system_settings row for API responses: add `typed_value`,
+    `is_secret` and `is_set`, and MASK secret values so neither the ciphertext
+    nor the plaintext ever leaves the backend. Mutates and returns the row.
+    """
+    value_type = row["value_type"]
+    if value_type == "secret":
+        raw = row.get("value") or ""
+        row["is_secret"] = True
+        row["is_set"] = bool(raw)
+        row["value"] = ""          # never expose ciphertext/plaintext to clients
+        row["typed_value"] = None
+    else:
+        row["is_secret"] = False
+        row["is_set"] = bool(row.get("value"))
+        row["typed_value"] = _cast_setting_value(row["value"], value_type)
+    return row
 
 
 def list_settings() -> list[dict]:
     """
-    Return every settings row, with the cast value pre-computed in
-    a 'typed_value' field so the frontend doesn't need to cast.
+    Return every settings row, with `typed_value` pre-computed so the frontend
+    doesn't need to cast. Secret values are masked (see _present_setting_row).
     """
     with _conn() as conn:
         with _dict_cursor(conn) as cur:
@@ -1208,7 +1301,7 @@ def list_settings() -> list[dict]:
             rows = cur.fetchall()
 
     for r in rows:
-        r["typed_value"] = _cast_setting_value(r["value"], r["value_type"])
+        _present_setting_row(r)
     return rows
 
 
@@ -1253,11 +1346,27 @@ def set_setting(key: str, value: str, admin_id: int) -> dict | None:
     Upsert a setting. The value_type is NOT changed here — setting types
     are defined by the seed INSERT in init_db() and are considered stable.
 
-    Returns the updated row (with typed_value), or None if the key does
-    not exist (we refuse to create new settings at runtime).
+    Returns the updated row (masked + with typed_value), or None if the key
+    does not exist (we refuse to create new settings at runtime).
+
+    Secret-typed settings are ENCRYPTED before storage. Passing an empty string
+    clears the secret (stores '').
     """
     with _conn() as conn:
         with _dict_cursor(conn) as cur:
+            # Look up the declared type first so we know whether to encrypt.
+            cur.execute(
+                "SELECT value_type FROM system_settings WHERE key = %s", (key,)
+            )
+            meta = cur.fetchone()
+            if meta is None:
+                return None
+
+            stored = value
+            if meta["value_type"] == "secret":
+                from app.services.secret_crypto import encrypt
+                stored = encrypt(value)
+
             cur.execute(
                 """
                 UPDATE system_settings
@@ -1268,12 +1377,12 @@ def set_setting(key: str, value: str, admin_id: int) -> dict | None:
                 RETURNING key, value, value_type, description,
                           updated_at, updated_by
                 """,
-                (value, admin_id, key),
+                (stored, admin_id, key),
             )
             row = cur.fetchone()
         conn.commit()
 
     if row is not None:
-        row["typed_value"] = _cast_setting_value(row["value"], row["value_type"])
+        _present_setting_row(row)
     return row
 

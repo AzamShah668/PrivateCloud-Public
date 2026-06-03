@@ -26,15 +26,17 @@ from contextlib import contextmanager
 import redis
 
 from app.celery_app import celery_app
-from app.proxmox_client import ProxmoxClient, ProxmoxAPIError
+from app.proxmox_client import ProxmoxAPIError, proxmox
 from app.models.vm import VMStatus
 from db import database
 from db import templates as tdb
 
 logger = logging.getLogger(__name__)
 
-# One ProxmoxClient per worker process (stateless with token auth).
-proxmox = ProxmoxClient()
+# `proxmox` is the shared client proxy: it delegates to a ProxmoxClient built
+# lazily on first use from DB-backed config (setup wizard) with .env fallback.
+# (A celery-worker restart picks up later config changes — the worker already
+# requires a restart for task/code changes.)
 
 # Redis lock to serialise CONCURRENT CLONES OF THE SAME SOURCE VMID.
 # Proxmox itself holds an exclusive flock on /var/lock/qemu-server/lock-<vmid>.conf

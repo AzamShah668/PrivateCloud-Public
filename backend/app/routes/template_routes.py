@@ -55,7 +55,8 @@ from app.models.template import (
     AssignmentCountResponse,
 )
 from app.models.vm import VMJobResponse
-from app.proxmox_client import ProxmoxClient
+from app import config
+from app.proxmox_client import proxmox
 from app.tasks.clone_tasks import (
     build_template,
     clone_template_for_student,
@@ -68,16 +69,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Templates & Cloning"])
 
-proxmox = ProxmoxClient()
-
-# Proxmox node clones are created on. Same default as VMCreateRequest.
-_DEFAULT_NODE = os.getenv("PROXMOX_NODE", "home")
+# `proxmox` (imported above) is the shared client proxy: it always delegates to
+# the current ProxmoxClient, which reads host/node/creds from DB-backed config
+# (setup wizard) with .env fallback and rebuilds when settings change.
 
 # Teacher-distributed clones are managed by the teacher, not the 2h auto-expire
-# scheduler. None disables auto-expiry; override with CLONE_LEASE_HOURS to set a
-# finite lease instead.
-_CLONE_LEASE_HOURS_ENV = os.getenv("CLONE_LEASE_HOURS", "").strip()
-_CLONE_LEASE_HOURS: int | None = int(_CLONE_LEASE_HOURS_ENV) if _CLONE_LEASE_HOURS_ENV else None
+# scheduler. 0 / unset disables auto-expiry; set CLONE_LEASE_HOURS for a finite lease.
+_CLONE_LEASE_HOURS: int | None = config.get_config_int("CLONE_LEASE_HOURS", 0) or None
 
 # Redis client for the cross-request VMID allocation lock.
 _redis = redis.Redis.from_url(os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0"))
@@ -178,7 +176,7 @@ def create_template(
             proxmox._ensure_authenticated()
             template_vmid = proxmox.get_free_vmids(
                 count=1,
-                node=_DEFAULT_NODE,
+                node=proxmox.default_node,
                 extra_reserved=database.get_reserved_vmids(),
             )[0]
         except Exception as exc:
@@ -205,7 +203,7 @@ def create_template(
         source_vmid=source_vmid,
         template_vmid=template_vmid,
         template_name=template_name,
-        node=_DEFAULT_NODE,
+        node=proxmox.default_node,
     )
 
     database.log_action(
@@ -359,7 +357,7 @@ def distribute_template(
             proxmox._ensure_authenticated()
             vmids = proxmox.get_free_vmids(
                 count=len(student_ids),
-                node=_DEFAULT_NODE,
+                node=proxmox.default_node,
                 extra_reserved=database.get_reserved_vmids(),
             )
         except Exception as exc:
@@ -386,7 +384,7 @@ def distribute_template(
                 "os_choice": os_choice,
                 "cpu_cores": cpu_cores,
                 "ram_mb": ram_mb,
-                "node": _DEFAULT_NODE,
+                "node": proxmox.default_node,
                 "cloned_from_template": template_id,
                 "batch_id": batch["id"],
             }
@@ -420,7 +418,7 @@ def distribute_template(
             os_choice_value=os_choice,
             cpu_cores=cpu_cores,
             ram_mb=ram_mb,
-            node=_DEFAULT_NODE,
+            node=proxmox.default_node,
             full=full,
         )
 
@@ -655,7 +653,7 @@ def deploy_template(
             proxmox._ensure_authenticated()
             new_vmid = proxmox.get_free_vmids(
                 count=1,
-                node=_DEFAULT_NODE,
+                node=proxmox.default_node,
                 extra_reserved=database.get_reserved_vmids(),
             )[0]
         except Exception as exc:
@@ -667,7 +665,7 @@ def deploy_template(
             "os_choice": os_choice,
             "cpu_cores": cpu_cores,
             "ram_mb": ram_mb,
-            "node": _DEFAULT_NODE,
+            "node": proxmox.default_node,
             "deployed_from_template": template_id,
         }
         # Assigned template deploys bypass the per-student daily quota (the
@@ -691,7 +689,7 @@ def deploy_template(
         os_choice_value=os_choice,
         cpu_cores=cpu_cores,
         ram_mb=ram_mb,
-        node=_DEFAULT_NODE,
+        node=proxmox.default_node,
         full=full,
     )
 

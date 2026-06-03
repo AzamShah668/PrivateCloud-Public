@@ -12,6 +12,7 @@ const TYPE_STYLES: Record<SettingValueType, string> = {
   boolean: "bg-accent-amber/10 text-accent-amber border-accent-amber/20",
   json: "bg-accent-blue/10 text-accent-blue border-accent-blue/20",
   string: "bg-elevated text-muted border-border-subtle",
+  secret: "bg-accent-magenta/10 text-accent-magenta border-accent-magenta/20",
 };
 
 function parseValueByType(
@@ -195,13 +196,18 @@ export default function AdminSettingsPage() {
                       />
                     ) : (
                       <input
-                        type="text"
+                        type={setting.value_type === "secret" ? "password" : "text"}
                         value={draftValue}
                         onChange={(e) => setDraftValue(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") handleSave(setting);
                           if (e.key === "Escape") cancelEdit();
                         }}
+                        placeholder={
+                          setting.value_type === "secret"
+                            ? "Enter a new value (leave blank to clear)"
+                            : undefined
+                        }
                         className="w-full px-3 h-8 text-xs font-mono text-primary bg-elevated border border-accent-cyan/30 rounded-[var(--radius-sm)] outline-none focus:border-accent-cyan"
                         autoFocus
                       />
@@ -224,6 +230,10 @@ export default function AdminSettingsPage() {
                       </button>
                     </div>
                   </div>
+                ) : setting.value_type === "secret" ? (
+                  <pre className="text-xs font-mono text-accent-magenta bg-elevated/50 rounded-[var(--radius-sm)] px-3 py-2">
+                    {setting.is_set ? "•••••••••••• (configured)" : "(not set)"}
+                  </pre>
                 ) : (
                   <pre className="text-xs font-mono text-accent-cyan bg-elevated/50 rounded-[var(--radius-sm)] px-3 py-2 overflow-x-auto whitespace-pre-wrap break-all">
                     {formatTypedValue(setting)}

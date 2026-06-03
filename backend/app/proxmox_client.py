@@ -23,7 +23,6 @@
 #   If not set → ticket auth, authenticate() must be called first.
 # =============================================================================
 
-import os
 import time
 import logging
 from datetime import datetime, timedelta, timezone
@@ -32,6 +31,8 @@ from typing import Optional, Dict, Any, List
 import requests
 from requests.exceptions import RequestException
 from dotenv import load_dotenv
+
+from app import config
 
 load_dotenv()
 
@@ -80,37 +81,39 @@ class ProxmoxClient:
     TICKET_LIFETIME_MINUTES = 115
 
     def __init__(self):
-        self.host         = os.getenv("PROXMOX_HOST",     "192.168.1.100")
-        self.default_node = os.getenv("PROXMOX_NODE",     "home")
+        # All operational config is resolved through app.config (DB-backed
+        # system_settings first, then .env fallback). Construct a fresh client
+        # via get_proxmox_client() after settings change so new values apply
+        # without a container restart.
+        self.host         = config.get_config_str("PROXMOX_HOST", "192.168.1.100")
+        self.default_node = config.get_config_str("PROXMOX_NODE", "home")
 
 
         # --- NGROK ADJUSTMENT ---
         # If the host contains 'ngrok-free.dev', we don't need port 8006
         if "ngrok-free" in self.host:
-            self.port_suffix = "" 
+            self.port_suffix = ""
             self.verify_ssl = True # ngrok provides valid SSL!
         else:
             self.port_suffix = ":8006"
-            self.verify_ssl = os.getenv("PROXMOX_VERIFY_SSL", "false").lower() == "true"
+            self.verify_ssl = config.get_config_bool("PROXMOX_VERIFY_SSL", False)
         # ------------------------
 
         # ── Auth method selection ────────────────────────────────────────
         # If PROXMOX_TOKEN_ID is set → use API token auth (preferred).
         # Otherwise → fall back to legacy ticket-based auth.
-        self._token_id:       Optional[str] = os.getenv("PROXMOX_TOKEN_ID")
-        self._token_secret:   Optional[str] = os.getenv("PROXMOX_TOKEN_SECRET")
+        self._token_id:       Optional[str] = config.get_config("PROXMOX_TOKEN_ID") or None
+        self._token_secret:   Optional[str] = config.get_config("PROXMOX_TOKEN_SECRET") or None
         self._use_token_auth: bool = bool(self._token_id and self._token_secret)
 
         # Legacy ticket auth credentials (only needed if not using tokens)
-        self.username = os.getenv("PROXMOX_USER",     "root@pam")
-        self.password = os.getenv("PROXMOX_PASSWORD", "")
+        self.username = config.get_config_str("PROXMOX_USER", "root@pam")
+        self.password = config.get_config_str("PROXMOX_PASSWORD", "")
 
         # Disable SSL verification if you're using a self-signed cert
         # (common in university labs). Set PROXMOX_VERIFY_SSL=true in
         # production when you have a proper certificate.
-        self.verify_ssl: bool = (
-            os.getenv("PROXMOX_VERIFY_SSL", "false").lower() == "true"
-        )
+        self.verify_ssl: bool = config.get_config_bool("PROXMOX_VERIFY_SSL", False)
 
         # These are populated by authenticate() — only used for ticket auth
         self._ticket:        Optional[str]      = None
@@ -120,19 +123,19 @@ class ProxmoxClient:
         # ── Golden image config ──────────────────────────────────────────
         # VMID of the Linux (cloud-init) golden template — cloned for
         # ubuntu-*, debian-*, centos-* OS choices. Default 9000.
-        self.golden_image_vmid: int = int(os.getenv("GOLDEN_IMAGE_VMID", "9000"))
+        self.golden_image_vmid: int = config.get_config_int("GOLDEN_IMAGE_VMID", 9000)
         # Windows 11 template VMID — cloned only when os_choice is windows-11.
-        self.windows_template_vmid: int = int(os.getenv("WINDOWS_TEMPLATE_VMID", "9001"))
+        self.windows_template_vmid: int = config.get_config_int("WINDOWS_TEMPLATE_VMID", 9001)
 
         # Default SSH credentials baked into the Linux golden image.
         # These are returned to the user after VM creation so they can log in.
-        self.vm_default_username: str = os.getenv("VM_DEFAULT_USERNAME", "ubuntu")
-        self.vm_default_password: str = os.getenv("VM_DEFAULT_PASSWORD", "")
+        self.vm_default_username: str = config.get_config_str("VM_DEFAULT_USERNAME", "ubuntu")
+        self.vm_default_password: str = config.get_config_str("VM_DEFAULT_PASSWORD", "")
 
         # Optional: credentials for the Windows golden template (falls back to
-        # VM_DEFAULT_* if unset so a single .env still works for one-OS labs).
-        self.vm_windows_username: str = os.getenv("VM_WINDOWS_USERNAME") or self.vm_default_username
-        self.vm_windows_password: str = os.getenv("VM_WINDOWS_PASSWORD") or self.vm_default_password
+        # VM_DEFAULT_* if unset so a single config still works for one-OS labs).
+        self.vm_windows_username: str = config.get_config_str("VM_WINDOWS_USERNAME", "") or self.vm_default_username
+        self.vm_windows_password: str = config.get_config_str("VM_WINDOWS_PASSWORD", "") or self.vm_default_password
 
         # Suppress urllib3's "InsecureRequestWarning" when verify_ssl=False
         if not self.verify_ssl:
@@ -810,3 +813,44 @@ class ProxmoxClient:
             "IP polling timed out for vmid=%d after %ds.", vmid, timeout
         )
         return None
+
+
+# =============================================================================
+# Shared client accessor
+# =============================================================================
+# ProxmoxClient reads its connection config (host, credentials, VMIDs) once, in
+# __init__. Because operational config can now be changed at runtime via the
+# admin UI / setup wizard, a long-lived singleton would keep stale values until
+# a container restart. This accessor caches a single client but transparently
+# REBUILDS it whenever app.config's generation counter changes (i.e. after any
+# setting is written), so new Proxmox config takes effect on the next call.
+
+_shared_client: Optional["ProxmoxClient"] = None
+_shared_client_generation: int = -1
+
+
+def get_proxmox_client() -> "ProxmoxClient":
+    """Return the shared ProxmoxClient, rebuilding it if config has changed."""
+    global _shared_client, _shared_client_generation
+    current_gen = config.config_generation()
+    if _shared_client is None or _shared_client_generation != current_gen:
+        _shared_client = ProxmoxClient()
+        _shared_client_generation = current_gen
+    return _shared_client
+
+
+class _ProxmoxClientProxy:
+    """
+    A module-level stand-in that delegates every attribute access to the
+    current shared client (get_proxmox_client()). This lets existing call sites
+    keep using a simple `proxmox.<method>()` global while transparently picking
+    up runtime config changes (setup wizard / admin settings) — no restart, no
+    edits at each call site.
+    """
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(get_proxmox_client(), name)
+
+
+# Importable shared proxy: `from app.proxmox_client import proxmox`
+proxmox = _ProxmoxClientProxy()

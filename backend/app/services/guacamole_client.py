@@ -16,6 +16,8 @@ from urllib.parse import quote
 
 import requests
 
+from app import config
+
 logger = logging.getLogger(__name__)
 
 
@@ -57,7 +59,9 @@ def _api_base() -> str:
 
 
 def _public_base() -> str:
-    base = os.getenv("GUACAMOLE_PUBLIC_URL", "").rstrip("/")
+    # Browser-facing config — sourced from DB-backed settings (setup wizard) with
+    # .env fallback. Read per call so admin changes apply without a restart.
+    base = config.get_config_str("GUACAMOLE_PUBLIC_URL", "").rstrip("/")
     if not base:
         raise GuacamoleConfigurationError(
             "GUACAMOLE_PUBLIC_URL is not set (browser-reachable base, e.g. http://localhost:9080/guacamole)"
@@ -66,11 +70,11 @@ def _public_base() -> str:
 
 
 def _admin_user() -> str:
-    return os.getenv("GUACAMOLE_ADMIN_USER", "guacadmin")
+    return config.get_config_str("GUACAMOLE_ADMIN_USER", "guacadmin")
 
 
 def _admin_password() -> str:
-    return os.getenv("GUACAMOLE_ADMIN_PASSWORD", "guacadmin")
+    return config.get_config_str("GUACAMOLE_ADMIN_PASSWORD", "guacadmin")
 
 
 def _mysql_datasource() -> str:

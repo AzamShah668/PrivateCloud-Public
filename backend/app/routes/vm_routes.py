@@ -53,7 +53,8 @@ from app.models.vm import (
     VMJobResponse,
     VMEnrichedResponse,
 )
-from app.proxmox_client import ProxmoxClient, ProxmoxAPIError
+from app.proxmox_client import ProxmoxAPIError, proxmox
+from app.services.reconciliation import reconcile_vm_existence
 
 logger = logging.getLogger(__name__)
 
@@ -61,12 +62,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/vms", tags=["Virtual Machines"])
 
 # ---------------------------------------------------------------------------
-# Shared ProxmoxClient instance.
-# In a real production app you'd use FastAPI's dependency injection or
-# a startup event to initialise this. For Sprint 1 a module-level instance
-# is perfectly fine.
+# Shared Proxmox client.
+# `proxmox` is a module-level proxy (imported above) that always delegates to
+# the current shared ProxmoxClient, so runtime config changes from the setup
+# wizard / admin settings take effect without a restart. Call sites are
+# unchanged — they still use `proxmox.<method>()`.
 # ---------------------------------------------------------------------------
-proxmox = ProxmoxClient()
 
 
 # =============================================================================
@@ -231,18 +232,35 @@ def list_my_vms(
 
     # ── Fetch all live VM statuses from Proxmox in one call ───────────────
     live_status_map: dict = {}  # vmid → Proxmox status dict
+    proxmox_reachable = False
     try:
         proxmox._ensure_authenticated()
         all_vms = proxmox.list_vms()
         # Build a lookup by vmid for fast matching
         live_status_map = {vm["vmid"]: vm for vm in all_vms}
+        proxmox_reachable = True
     except Exception as exc:
         # Proxmox unreachable — we still return DB data, just without live info
         logger.warning(f"Could not fetch live VM list from Proxmox: {exc}")
 
+    # ── Reconcile the DB against live Proxmox ─────────────────────────────
+    # Source of truth is Proxmox: any VM that should be live but is gone from
+    # the hypervisor (deleted out-of-band) gets soft-deleted in the DB here, so
+    # we read the *corrected* DB below instead of hallucinating a dead VM.
+    # Guard G1: only reconcile when the live list actually succeeded — never
+    # mass-delete the inventory on a transient Proxmox outage.
+    deleted_ids: set[int] = set()
+    if proxmox_reachable:
+        live_vmids = {int(vmid) for vmid in live_status_map}
+        deleted_ids = reconcile_vm_existence(jobs, live_vmids)
+
     # ── Merge DB records with live Proxmox data ──────────────────────────
     enriched = []
     for job in jobs:
+        # Drop rows we just reconciled away — they no longer exist on Proxmox.
+        if job["id"] in deleted_ids:
+            continue
+
         # Start with the base DB fields
         result = dict(job)
 

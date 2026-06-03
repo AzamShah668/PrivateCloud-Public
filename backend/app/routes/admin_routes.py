@@ -108,8 +108,12 @@ class UpdateQuotaRequest(BaseModel):
 class SettingResponse(BaseModel):
     key: str
     value: str
-    value_type: Literal["string", "integer", "boolean", "json"]
-    typed_value: Any
+    value_type: Literal["string", "integer", "boolean", "json", "secret"]
+    typed_value: Any = None
+    # For secret-typed settings, value/typed_value are masked (blank). `is_set`
+    # tells the UI whether a secret is configured without revealing it.
+    is_secret: bool = False
+    is_set: bool = False
     description: str | None = None
     updated_at: datetime
     updated_by: int | None = None
@@ -174,25 +178,39 @@ def list_all_vms(
     verify_proxmox: bool = Query(
         default=False,
         description=(
-            "When true, cross-check each VM's vmid against the live "
-            "Proxmox node and exclude entries whose VM no longer exists."
+            "When true, also EXCLUDE from the response any VM whose vmid is "
+            "not currently on the live Proxmox node (used by the "
+            "Publish-Template picker). Note: DB<->Proxmox reconciliation now "
+            "runs on every call regardless of this flag."
         ),
     ),
 ) -> List[VMJobAdminResponse]:
     jobs = database.list_all_vm_jobs()
 
-    if verify_proxmox:
-        try:
-            from app.proxmox_client import ProxmoxClient
-            px = ProxmoxClient()
-            px._ensure_authenticated()
-            live_vms = px.list_vms()
-            live_vmids = {int(v["vmid"]) for v in live_vms}
-            jobs = [j for j in jobs if j["vmid"] in live_vmids]
-        except Exception as exc:
-            logger.warning(
-                "verify_proxmox failed, returning unfiltered list: %s", exc,
-            )
+    # ── Reconcile the DB against live Proxmox (source of truth) ───────────
+    # Any VM that has vanished from the hypervisor (deleted out-of-band in the
+    # Proxmox UI) is soft-deleted in the DB here, so admins can't act on stale
+    # rows (e.g. publish a template from a deleted VM — debugging journal #14)
+    # and the list reflects reality. Best-effort + guarded: if Proxmox is
+    # unreachable we leave the DB untouched (guard G1) and return what we have.
+    live_vmids: set[int] | None = None
+    try:
+        from app.proxmox_client import ProxmoxClient
+        from app.services.reconciliation import reconcile_vm_existence
+
+        px = ProxmoxClient()
+        px._ensure_authenticated()
+        live_vmids = {int(v["vmid"]) for v in px.list_vms()}
+        reconcile_vm_existence(jobs, live_vmids)
+        jobs = database.list_all_vm_jobs()  # re-read: statuses now reflect soft-deletes
+    except Exception as exc:
+        logger.warning(
+            "VM reconciliation skipped (Proxmox unreachable): %s", exc,
+        )
+
+    # Explicit "only live VMs" filter for callers that need a clean picker.
+    if verify_proxmox and live_vmids is not None:
+        jobs = [j for j in jobs if j["vmid"] in live_vmids]
 
     return [VMJobAdminResponse.model_validate(j) for j in jobs]
 
@@ -459,7 +477,7 @@ def update_platform_setting(
     else:
         str_value = str(raw_value)
 
-    # Record the old value so the audit entry shows the diff
+    # Record the old value so the audit entry shows the diff (non-secrets only).
     old = database.get_setting(key)
 
     updated = database.set_setting(key, str_value, admin.id)
@@ -472,6 +490,17 @@ def update_platform_setting(
             ),
         )
 
+    # Refresh the config cache so the new value takes effect immediately — the
+    # Proxmox/LLM clients rebuild on their next call (config generation bumps).
+    from app import config as app_config
+    app_config.invalidate_cache()
+
+    # Never write secret plaintext into the audit log.
+    if updated.get("is_secret"):
+        audit_details = {"key": key, "secret": True, "is_set": updated.get("is_set")}
+    else:
+        audit_details = {"key": key, "old": old, "new": updated["typed_value"]}
+
     database.log_action(
         user_id=admin.id,
         action_type="settings.change",
@@ -479,7 +508,7 @@ def update_platform_setting(
         target_type="setting",
         target_id=key,
         target_user_id=None,
-        details={"key": key, "old": old, "new": updated["typed_value"]},
+        details=audit_details,
     )
 
     return SettingResponse.model_validate(updated)

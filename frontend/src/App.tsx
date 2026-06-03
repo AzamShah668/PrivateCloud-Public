@@ -10,6 +10,7 @@ import DashboardPage from "@/pages/DashboardPage";
 import CreateVMPage from "@/pages/CreateVMPage";
 import VMDetailPage from "@/pages/VMDetailPage";
 import ChatOpsPage from "@/pages/ChatOpsPage";
+import SetupWizardPage from "@/pages/SetupWizardPage";
 import NotFoundPage from "@/pages/NotFoundPage";
 
 // Admin pages
@@ -51,6 +52,9 @@ export default function App() {
 
         {/* Protected routes — wrapped in AppShell */}
         <Route element={<ProtectedRoute />}>
+          {/* First-run onboarding — full screen, no AppShell chrome */}
+          <Route path="/setup" element={<SetupWizardPage />} />
+
           <Route element={<AppShell />}>
             <Route index element={<DashboardPage />} />
             <Route path="/vms/create" element={<CreateVMPage />} />

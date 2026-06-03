@@ -18,16 +18,16 @@
 
 import logging
 from app.celery_app import celery_app
-from app.proxmox_client import ProxmoxClient, ProxmoxAPIError
+from app.proxmox_client import ProxmoxAPIError, proxmox
 from app.models.vm import VMStatus
 from db import database
 
 logger = logging.getLogger(__name__)
 
-# Each Celery worker process gets its own ProxmoxClient instance.
-# This is fine because ProxmoxClient is stateless (with API token auth)
-# or handles ticket renewal internally (with ticket auth).
-proxmox = ProxmoxClient()
+# `proxmox` is the shared client proxy: it delegates to a ProxmoxClient built
+# lazily on first use from DB-backed config (setup wizard) with .env fallback.
+# (A celery-worker restart is needed to pick up later config changes — the
+# worker already requires a restart for task/code changes.)
 
 
 def _log_event(user_id, action, target_type, target_id, details):

@@ -5,7 +5,6 @@
 # incoming strings into validated Pydantic parameter payload execution trees.
 # =============================================================================
 
-import os
 import json
 import logging
 from collections import deque
@@ -13,6 +12,7 @@ from typing import Any, Dict, List
 
 from openai import AsyncOpenAI
 
+from app import config
 from app.models.user import UserInDB
 from app.models.vm import VMCreateRequest, VMUpdateRequest, VMAction, OS_Choice
 from app.routes.vm_routes import create_vm, update_vm, delete_vm, list_my_vms
@@ -161,18 +161,38 @@ class CloudAgentService:
     """Orchestration system that evaluates user query intent and maps outputs to services."""
 
     def __init__(self):
-        self.api_key = os.getenv("OPENAI_API_KEY")
-        self.model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         # Per-user conversation memory: { username: deque([{role, content}, ...]) }
         self._history: Dict[str, deque] = {}
-        if not self.api_key:
-            self.client = None
-        else:
-            kwargs: Dict[str, Any] = {"api_key": self.api_key}
-            base_url = os.getenv("OPENAI_BASE_URL")
-            if base_url:
-                kwargs["base_url"] = base_url
-            self.client = AsyncOpenAI(**kwargs)
+        # The OpenAI client is built lazily (see the `client` property) so the
+        # LLM provider/key configured in the setup wizard / admin settings is
+        # picked up at runtime without recreating this singleton or restarting.
+        self._client: AsyncOpenAI | None = None
+        self._client_gen: int = -1
+
+    @property
+    def model_name(self) -> str:
+        """LLM model id, resolved from DB-backed config (env fallback)."""
+        return config.get_config_str("OPENAI_MODEL", "gpt-4o-mini")
+
+    @property
+    def client(self) -> AsyncOpenAI | None:
+        """
+        The OpenAI/OpenRouter client, rebuilt whenever config changes. Returns
+        None when no API key is configured (AI features then report unavailable).
+        """
+        gen = config.config_generation()
+        if self._client_gen != gen:
+            api_key = config.get_config("OPENAI_API_KEY")
+            if not api_key:
+                self._client = None
+            else:
+                kwargs: Dict[str, Any] = {"api_key": api_key}
+                base_url = config.get_config("OPENAI_BASE_URL")
+                if base_url:
+                    kwargs["base_url"] = base_url
+                self._client = AsyncOpenAI(**kwargs)
+            self._client_gen = gen
+        return self._client
 
     def _get_history(self, username: str) -> deque:
         """Returns the conversation history deque for a given user."""

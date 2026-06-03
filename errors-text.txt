@@ -1,0 +1,104 @@
+faizan.malik@Faizans-MacBook-Pro PrivateCloud % git pull
+Already up to date.
+faizan.malik@Faizans-MacBook-Pro PrivateCloud % docker compose up -- build
+no such service: build
+faizan.malik@Faizans-MacBook-Pro PrivateCloud % docker compose up --build 
+[+] up 12/12
+ ✔ Image mysql:8.4          Pulled                                                                      3.0s
+ ✔ Image redis:7-alpine     Pulled                                                                      8.1s
+ ✔ Image postgres:16-alpine Pulled                                                                      3.0s
+[+] Building 62.2s (35/35) FINISHED                                                                         
+ => [internal] load local bake definitions                                                             0.0s
+ => => reading from stdin 1.56kB                                                                       0.0s
+ => [celery-worker internal] load build definition from Dockerfile                                     0.0s
+ => => transferring dockerfile: 5.65kB                                                                 0.0s
+ => [frontend internal] load build definition from Dockerfile                                          0.0s
+ => => transferring dockerfile: 726B                                                                   0.0s
+ => [frontend internal] load metadata for docker.io/library/nginx:alpine                               2.9s
+ => [frontend internal] load metadata for docker.io/library/node:20-alpine                             1.5s
+ => [celery-worker internal] load metadata for docker.io/library/python:3.12-slim                      2.2s
+ => [celery-worker internal] load .dockerignore                                                        0.0s
+ => => transferring context: 628B                                                                      0.0s
+ => [celery-worker internal] load build context                                                        0.0s
+ => => transferring context: 290.95kB                                                                  0.0s
+ => [celery-worker builder 1/5] FROM docker.io/library/python:3.12-slim@sha256:090ba77e2958f6af52a534  0.0s
+ => => resolve docker.io/library/python:3.12-slim@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377  0.0s
+ => CACHED [backend builder 2/5] RUN apt-get update     && apt-get install -y --no-install-recommends  0.0s
+ => CACHED [backend builder 3/5] WORKDIR /build                                                        0.0s
+ => [celery-worker builder 4/5] COPY backend/requirements.txt .                                        0.1s
+ => [backend builder 5/5] RUN python -m venv /opt/venv &&     /opt/venv/bin/pip install --no-cache-d  49.7s
+ => [frontend internal] load .dockerignore                                                             0.0s
+ => => transferring context: 2B                                                                        0.0s
+ => [frontend build 1/6] FROM docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d5  0.0s
+ => => resolve docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6  0.0s
+ => [frontend internal] load build context                                                             0.0s
+ => => transferring context: 183.37kB                                                                  0.0s
+ => [frontend stage-1 1/3] FROM docker.io/library/nginx:alpine@sha256:8b1e78743a03dbb2c95171cc58639fe  5.0s
+ => => resolve docker.io/library/nginx:alpine@sha256:8b1e78743a03dbb2c95171cc58639fef29abc8816598e27f  0.0s
+ => => sha256:42394e2ad482f12a16d4ab961263041498e14296c323175c4419d797e43468cc 19.73MB / 19.73MB       4.8s
+ => => sha256:92c8eaa0c5e2811db8e51fe7f7b46319d9262ceebd17b874a5b77f81e296d1fd 1.40kB / 1.40kB         1.0s
+ => => sha256:79429faec0285d972d39bba343882b287ac08c1e7766951e257d4bcd838f42ed 1.21kB / 1.21kB         2.6s
+ => => sha256:58dfa199cc5789b16341ebe3ed56e76da7ff322bb3082e5dbdf9f4b2f12091ef 404B / 404B             1.2s
+ => => sha256:8dd0c1727b8e6406c345db087efe55647e6859013a66c6b5c86ed67210d9eef7 956B / 956B             0.7s
+ => => sha256:29fd1853467817272c4f31287383a55bf275577631264f19faad90957276b29b 627B / 627B             0.6s
+ => => sha256:a0a8eb1892ac4132988ce4aac8c4ff3599487a01129511f6fb60d01fae9a9351 1.90MB / 1.90MB         1.6s
+ => => extracting sha256:a0a8eb1892ac4132988ce4aac8c4ff3599487a01129511f6fb60d01fae9a9351              0.0s
+ => => extracting sha256:29fd1853467817272c4f31287383a55bf275577631264f19faad90957276b29b              0.0s
+ => => extracting sha256:8dd0c1727b8e6406c345db087efe55647e6859013a66c6b5c86ed67210d9eef7              0.0s
+ => => extracting sha256:58dfa199cc5789b16341ebe3ed56e76da7ff322bb3082e5dbdf9f4b2f12091ef              0.0s
+ => => extracting sha256:79429faec0285d972d39bba343882b287ac08c1e7766951e257d4bcd838f42ed              0.0s
+ => => extracting sha256:92c8eaa0c5e2811db8e51fe7f7b46319d9262ceebd17b874a5b77f81e296d1fd              0.0s
+ => => extracting sha256:42394e2ad482f12a16d4ab961263041498e14296c323175c4419d797e43468cc              0.2s
+ => CACHED [frontend build 2/6] WORKDIR /app                                                           0.0s
+ => CACHED [frontend build 3/6] COPY package.json package-lock.json* ./                                0.0s
+ => CACHED [frontend build 4/6] RUN npm ci                                                             0.0s
+ => [frontend build 5/6] COPY . .                                                                      0.1s
+ => [frontend build 6/6] RUN npm run build                                                             7.5s
+ => [frontend stage-1 2/3] COPY --from=build /app/dist /usr/share/nginx/html                           0.0s
+ => [frontend stage-1 3/3] COPY nginx.conf /etc/nginx/conf.d/default.conf                              0.0s
+ => [frontend] exporting to image                                                                      0.4s
+ => => exporting layers                                                                                0.3s
+ => => exporting manifest sha256:1c40cc0450f99c3c13ac9d0efe6f2badc95858898fd274061001026c0b9c86a0      0.0s
+ => => exporting config sha256:24aae92c6d43398064ba91060cd87925afe1d8276df5548dd49f7420020e61d4        0.0s
+ => => exporting attestation manifest sha256:08d659d71daf0a2c7ec070e404a0c06f8099d0749ab4229c0fcf1b6e  0.0s
+ => => exporting manifest list sha256:7dd3a5670cf276481f026326cc87100fcd7ef094f625987f4f4a03a2e944e70  0.0s
+ => => naming to docker.io/library/privatecloud-frontend:latest                                        0.0s
+ => => unpacking to docker.io/library/privatecloud-frontend:latest                                     0.0s
+ => [frontend] resolving provenance for metadata file                                                  0.0s
+ => CACHED [celery-worker runtime 2/8] RUN apt-get update     && apt-get install -y --no-install-reco  0.0s
+ => [backend runtime 3/8] COPY --from=builder /opt/venv /opt/venv                                      1.0s
+ => [backend runtime 4/8] RUN useradd --create-home --shell /bin/bash appuser                          0.2s
+ => [celery-worker runtime 5/8] WORKDIR /home/appuser/app                                              0.0s
+ => [backend runtime 6/8] RUN mkdir -p /home/appuser/app/data/chroma /home/appuser/.cache     && chow  0.1s
+ => [celery-worker runtime 7/8] COPY --chown=appuser:appuser backend/app/ ./app/                       0.0s
+ => [celery-worker runtime 8/8] COPY --chown=appuser:appuser db/ ./db/                                 0.0s
+ => ERROR [backend] exporting to image                                                                 7.6s
+ => => exporting layers                                                                                7.5s
+ => => exporting manifest sha256:68e93cc803c216ac7ab4a153988f8efa8c204bae714221f918c400f5726d1d7b      0.0s
+ => => exporting config sha256:bf07f898a99dba26dab9d388ad47ea6d0a92d37be8db3fe613a29d80211c28cf        0.0s
+ => => exporting attestation manifest sha256:85aaf94828c022b126feab6585d2aed8ae7de84360ead264994e2332  0.0s
+ => => exporting manifest list sha256:c83fa22b8459adad7d3ecbbceb70919e219f716e8749b647faf927a8324c074  0.0s
+ => => naming to docker.io/library/privatecloud-backend:latest                                         0.0s
+ => => unpacking to docker.io/library/privatecloud-backend:latest                                      0.0s
+ => ERROR [celery-worker] exporting to image                                                           7.6s
+ => => exporting layers                                                                                7.5s
+ => => exporting manifest sha256:3ab11d387409518a14530c6cf54fc4467e3b7c2649c161b24a845bcc97670fbd      0.0s
+ => => exporting config sha256:21b023a756634ede0951c7b5746230942981828a16e2a1589298d4fe87f619cb        0.0s
+ => => exporting attestation manifest sha256:187cbb56d5ff4bae42975973c194ee440740ff810bd258c57306f4e8  0.0s
+ => => exporting manifest list sha256:0ad591c83593e52737938d8d6895af4bf23e262d176fce34df9700941380b3b  0.0s
+ => => naming to docker.io/library/privatecloud-celery-worker:latest                                   0.0s
+ => => unpacking to docker.io/library/privatecloud-celery-worker:latest                                0.0s
+------
+ > [backend] exporting to image:
+[+] up 12/15
+ ✔ Image mysql:8.4                  Pulled                                                             3.0s
+ ✔ Image redis:7-alpine             Pulled                                                             8.1s
+ ✔ Image postgres:16-alpine         Pulled                                                             3.0s
+ ⠙ Image privatecloud-celery-worker Building                                                           62.3s
+ ⠙ Image privatecloud-frontend      Building                                                           62.3s
+ ⠙ Image privatecloud-backend       Building                                                           62.3s
+target backend: failed to solve: failed to prepare extraction snapshot "extract-753174005-dGbm sha256:a011187d2cdd5700ecf2bd20fa3b5a55d164fa5cdd4f60377ad3503fcaa31b26": parent snapshot sha256:2c13b64a9dcb2b2aa61b5161ca32db3b85ca365a3628a2fa98320e72f2e60704 does not exist: not found
+
+
+
+View build details: docker-desktop://dashboard/build/default/default/vlrcpu05p3ojdopgg0e20kpva

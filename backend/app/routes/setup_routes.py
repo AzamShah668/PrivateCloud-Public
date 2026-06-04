@@ -58,8 +58,19 @@ class SetupResultResponse(BaseModel):
 
 
 def _missing_required() -> list[str]:
-    """Required keys that are still empty/unset."""
-    return [k for k in REQUIRED_FOR_SETUP if config.get_config(k) in (None, "")]
+    """Required keys that are still empty/unset **in the DB store**.
+
+    We intentionally skip the env-var fallback here so the wizard still
+    triggers on deployments that happen to have a populated .env.  The
+    wizard should appear until an admin has *explicitly* configured the
+    platform through the UI (or the POST /setup endpoint).
+    """
+    missing = []
+    for k in REQUIRED_FOR_SETUP:
+        db_val = database.get_setting(k)
+        if db_val in (None, ""):
+            missing.append(k)
+    return missing
 
 
 def _to_str(value: Any) -> str:
@@ -91,11 +102,13 @@ def _test_proxmox() -> tuple[bool, str | None]:
 def setup_status(
     current_user: UserInDB = Depends(get_current_user),
 ) -> SetupStatusResponse:
-    stored = bool(database.get_setting(_SETUP_COMPLETED_KEY))
+    raw = database.get_setting(_SETUP_COMPLETED_KEY)
+    stored = isinstance(raw, str) and raw.strip().lower() in ("true", "1", "yes")
     missing = _missing_required()
-    # Treat setup as complete if the admin explicitly finished it OR the required
-    # connector is already resolvable (e.g. an existing deployment whose Proxmox
-    # config still comes from .env) — so upgrades aren't forced through the wizard.
+    # Treat setup as complete if the admin explicitly finished it OR every
+    # required key has been written to the DB via the wizard / settings page.
+    # .env fallback values are deliberately NOT considered here — the wizard
+    # should appear until an admin configures the platform through the UI.
     completed = stored or not missing
     return SetupStatusResponse(
         completed=completed,

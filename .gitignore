@@ -65,8 +65,16 @@ graphify-out/
 .graphify*
 _gen_obsidian.py
 
-# ── Distilled knowledge base (local-only, not published to GitHub) ──────────
-docs/knowledge/
+# ── Distilled knowledge base (Brain 2) — TRACKED ────────────────────────────
+# Committed to git so teammates and future sessions get the project's distilled
+# decisions/infra/debugging context. Verified clean of secrets — NEVER paste
+# real credentials, tokens, or keys into these files (they're published).
+# docs/knowledge/
+# …but keep Obsidian app metadata and empty scratch files out of git.
+docs/knowledge/.obsidian/
+docs/knowledge/*.base
+docs/knowledge/*.canvas
+docs/knowledge/2[0-9][0-9][0-9]-*.md
 
 # ── One-off debug/patch scripts (throwaway, not project code) ───────────────
 fix_guac.js

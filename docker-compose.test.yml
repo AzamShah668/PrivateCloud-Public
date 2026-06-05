@@ -1,0 +1,33 @@
+# =============================================================================
+# docker-compose.test.yml  —  overlay for wizard testing
+# =============================================================================
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml up --build
+#
+# This overlay swaps the database to a FRESH test database ("proxmox_test")
+# with its own volume, so the production "proxmox_app" data is untouched.
+# The setup wizard will trigger because the new DB has no settings seeded yet.
+#
+# To tear down ONLY the test data:
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml down -v
+# =============================================================================
+
+services:
+  postgres:
+    environment:
+      POSTGRES_DB: proxmox_test
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d proxmox_test"]
+
+  backend:
+    environment:
+      DB_NAME: proxmox_test
+
+  celery-worker:
+    environment:
+      DB_NAME: proxmox_test
+
+volumes:
+  postgres_test_data:

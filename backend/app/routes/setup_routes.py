@@ -83,7 +83,11 @@ def _to_str(value: Any) -> str:
 
 
 def _test_proxmox() -> tuple[bool, str | None]:
-    """Best-effort live check that the just-saved Proxmox config actually works."""
+    """Best-effort live check that the just-saved Proxmox config actually works.
+
+    Returns user-friendly error messages so the wizard can display actionable
+    advice instead of raw Python tracebacks.
+    """
     try:
         from app.proxmox_client import get_proxmox_client
         client = get_proxmox_client()
@@ -91,7 +95,43 @@ def _test_proxmox() -> tuple[bool, str | None]:
         client.list_vms()
         return True, None
     except Exception as exc:  # noqa: BLE001 - surface the reason to the wizard
-        return False, str(exc)
+        raw = str(exc).lower()
+
+        # ── Classify the error into a user-friendly message ──────────
+        if "hostname" in raw and "match" in raw or "certificate verify failed" in raw:
+            return False, (
+                "TLS certificate error — your Proxmox server uses a self-signed "
+                "certificate. Turn OFF the 'Verify TLS certificate' toggle and try again."
+            )
+        if "connection refused" in raw or "errno 111" in raw or "errno 10061" in raw:
+            return False, (
+                "Connection refused — the Proxmox server is not reachable at the "
+                "IP/hostname you entered. Make sure the server is running and you're "
+                "on the same network."
+            )
+        if "timed out" in raw or "timeout" in raw:
+            return False, (
+                "Connection timed out — cannot reach Proxmox. Check that the host IP "
+                "is correct and that port 8006 is open (or your ngrok tunnel is active)."
+            )
+        if "401" in raw or "authentication" in raw or "unauthorized" in raw:
+            return False, (
+                "401 Unauthorized — Proxmox rejected your credentials. Double-check "
+                "your API Token ID (format: user@realm!tokenname) and Token Secret."
+            )
+        if "403" in raw or "forbidden" in raw or "no permission" in raw:
+            return False, (
+                "403 Forbidden — the API token exists but doesn't have permission to "
+                "list VMs. In Proxmox, check Datacenter → Permissions and make sure "
+                "the token has the required privileges (e.g. PVEVMAdmin or PVEAdmin)."
+            )
+        if "name or service not known" in raw or "nodename nor servname" in raw:
+            return False, (
+                "DNS resolution failed — the hostname you entered could not be resolved. "
+                "Try using an IP address instead (e.g. 192.168.1.57)."
+            )
+        # Fallback: return the raw error with a prefix
+        return False, f"Proxmox connection test failed: {exc!s}"
 
 
 @router.get(

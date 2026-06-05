@@ -77,7 +77,15 @@ a worker restart — it already requires restarts for code changes.)
    `POST /setup`, which writes the settings, optionally **live-tests the Proxmox
    connection** (`list_vms()`), and sets `setup.completed=true` once the required
    connector fields are present.
-4. Existing config can be edited any time in Admin → Settings (secrets show as
+4. **LLM provider selector:** The wizard includes a provider picker (OpenAI /
+   OpenRouter / Custom). Selecting a provider auto-fills the base URL (blank for
+   OpenAI, `https://openrouter.ai/api/v1` for OpenRouter) and the model
+   placeholder. This removes the need for users to manually know and type the
+   correct base URL.
+5. **User-friendly error handling:** `_test_proxmox()` classifies common
+   exceptions (SSL cert, connection refused, timeout, 401/403, DNS failure)
+   into actionable advice shown in a persistent error banner on the wizard.
+6. Existing config can be edited any time in Admin → Settings (secrets show as
    `•••• (configured)` and accept a new value or blank-to-clear).
 
 ## Files
